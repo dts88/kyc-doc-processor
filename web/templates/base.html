@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}KYC Settings{% endblock %}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; max-width: 960px; margin: 0 auto; padding: 20px; color: #333; background: #f5f6fa; }
+        h1 { color: #1a5276; border-bottom: 2px solid #1a5276; padding-bottom: 10px; margin-bottom: 20px; }
+        h2 { color: #2c3e50; margin: 25px 0 15px; }
+        a { color: #3498db; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* Navigation */
+        nav { background: #2c3e50; padding: 0; margin: -20px -20px 25px; border-radius: 0; }
+        nav ul { list-style: none; display: flex; flex-wrap: wrap; }
+        nav li a { display: block; color: #ecf0f1; padding: 14px 20px; font-size: 14px; }
+        nav li a:hover, nav li a.active { background: #1a5276; text-decoration: none; }
+
+        /* Flash messages */
+        .flash { padding: 12px 16px; margin-bottom: 16px; border-radius: 4px; }
+        .flash.success { background: #d5f5e3; color: #1e8449; border-left: 4px solid #27ae60; }
+        .flash.error { background: #fadbd8; color: #922b21; border-left: 4px solid #e74c3c; }
+
+        /* Stat cards */
+        .stat-cards { display: flex; gap: 20px; flex-wrap: wrap; margin: 20px 0; }
+        .stat-card { background: #fff; border-left: 4px solid #3498db; padding: 15px 20px; min-width: 180px; flex: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .stat-card .number { font-size: 28px; font-weight: bold; color: #2c3e50; }
+        .stat-card .label { color: #7f8c8d; font-size: 14px; margin-top: 4px; }
+        .stat-card a { display: block; margin-top: 8px; font-size: 13px; }
+        .stat-card.ok { border-left-color: #27ae60; }
+        .stat-card.warn { border-left-color: #e67e22; }
+        .stat-card.off { border-left-color: #e74c3c; }
+
+        /* Tables */
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { border: 1px solid #ddd; padding: 10px 12px; text-align: left; }
+        th { background: #2c3e50; color: white; font-size: 14px; }
+        tr:nth-child(even) { background: #f8f9fa; }
+
+        /* Forms */
+        .form-section { background: #fff; padding: 20px; margin: 15px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 4px; }
+        .form-row { margin-bottom: 14px; }
+        .form-row label { display: block; font-weight: bold; margin-bottom: 4px; font-size: 14px; color: #2c3e50; }
+        .form-row input, .form-row select { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        .form-row input:focus, .form-row select:focus { outline: none; border-color: #3498db; }
+        .form-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+        .form-inline .form-row { flex: 1; min-width: 150px; margin-bottom: 0; }
+        .form-inline button { margin-bottom: 0; }
+
+        /* Buttons */
+        button, .btn { display: inline-block; padding: 8px 18px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-primary:hover { background: #2980b9; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-success:hover { background: #1e8449; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-secondary { background: #95a5a6; color: white; }
+        .btn-secondary:hover { background: #7f8c8d; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+        /* Info box */
+        .info-box { background: #eaf2f8; border-left: 4px solid #3498db; padding: 12px 16px; margin: 15px 0; font-size: 14px; color: #2c3e50; }
+
+        .footer { margin-top: 40px; padding-top: 15px; border-top: 1px solid #ddd; color: #999; font-size: 12px; text-align: center; }
+    </style>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('dashboard.index') }}" class="{% if request.endpoint == 'dashboard.index' %}active{% endif %}">Dashboard</a></li>
+            <li><a href="{{ url_for('email_config.email_settings') }}" class="{% if request.endpoint == 'email_config.email_settings' %}active{% endif %}">Email Config</a></li>
+            <li><a href="{{ url_for('vp_emails.vp_email_list') }}" class="{% if request.endpoint == 'vp_emails.vp_email_list' %}active{% endif %}">VP Emails</a></li>
+            <li><a href="{{ url_for('vp_signatures.vp_signature_list') }}" class="{% if request.endpoint == 'vp_signatures.vp_signature_list' %}active{% endif %}">VP Signatures</a></li>
+            <li><a href="{{ url_for('kyc_team.kyc_team_list') }}" class="{% if request.endpoint == 'kyc_team.kyc_team_list' %}active{% endif %}">KYC Team</a></li>
+        </ul>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+
+    <div class="footer">KYC Document Processor - Settings Interface</div>
+</body>
+</html>

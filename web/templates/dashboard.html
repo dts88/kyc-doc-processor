@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}KYC Settings - Dashboard{% endblock %}
+{% block content %}
+<h1>Settings Dashboard</h1>
+
+<div class="stat-cards">
+    <div class="stat-card {{ 'ok' if smtp_configured else 'off' }}">
+        <div class="number">{{ "ON" if smtp_configured else "OFF" }}</div>
+        <div class="label">SMTP Email</div>
+        <a href="{{ url_for('email_config.email_settings') }}">Configure &rarr;</a>
+    </div>
+    <div class="stat-card {{ 'ok' if vp_email_count > 0 else 'warn' }}">
+        <div class="number">{{ vp_email_count }}</div>
+        <div class="label">VP Emails</div>
+        <a href="{{ url_for('vp_emails.vp_email_list') }}">Manage &rarr;</a>
+    </div>
+    <div class="stat-card {{ 'ok' if vp_signature_count > 0 else 'warn' }}">
+        <div class="number">{{ vp_signature_count }}</div>
+        <div class="label">VP Signatures</div>
+        <a href="{{ url_for('vp_signatures.vp_signature_list') }}">Manage &rarr;</a>
+    </div>
+    <div class="stat-card {{ 'ok' if kyc_team_count > 0 else 'warn' }}">
+        <div class="number">{{ kyc_team_count }}</div>
+        <div class="label">KYC Team Members</div>
+        <a href="{{ url_for('kyc_team.kyc_team_list') }}">Manage &rarr;</a>
+    </div>
+</div>
+
+<div class="info-box">
+    <strong>Quick Setup Guide:</strong><br>
+    1. Configure SMTP for email notifications<br>
+    2. Add VP emails for onboarding form confirmation<br>
+    3. Record VP signatures from verified forms<br>
+    4. Add KYC team members to receive notifications
+</div>
+{% endblock %}

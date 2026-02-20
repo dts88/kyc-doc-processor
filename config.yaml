@@ -1,0 +1,63 @@
+# KYC Document Processor Configuration
+
+paths:
+  inbox: data/inbox
+  processing: data/processing
+  classified: data/classified
+  completed: data/completed
+  archive: data/archive
+  reports: data/reports
+  database: data/kyc.db
+
+claude:
+  classification_model: claude-sonnet-4-20250514
+  extraction_model_simple: claude-sonnet-4-20250514
+  extraction_model_complex: claude-opus-4-20250115
+  max_retries: 3
+  retry_base_delay: 1.0
+  max_image_size_mb: 20
+  max_image_dimension: 4096
+
+classification:
+  confidence_threshold: 0.7
+  fuzzy_match_threshold: 85
+  max_classification_images: 5   # max pages sent to Claude for classification
+  max_extraction_images: 10      # max pages sent to Claude for extraction
+
+processing:
+  scan_dpi: 300
+  max_image_dimension: 4096
+  jpeg_quality: 85
+  supported_extensions:
+    - .pdf
+    - .docx
+    - .xlsx
+    - .png
+    - .jpg
+    - .jpeg
+    - .tiff
+    - .tif
+    - .bmp
+
+notification:
+  smtp_host: ""
+  smtp_port: 587
+  smtp_user: ""
+  smtp_password: ""
+  from_address: ""
+  compliance_team:
+    - ""
+
+reporting:
+  schedule_day: monday
+  schedule_time: "09:00"
+
+validation:
+  shareholder_min_percentage: 10     # minimum % for shareholder listing
+  bank_reference_max_age_days: 365   # max age for bank reference letter
+
+logging:
+  level: INFO   # DEBUG, INFO, WARNING, ERROR
+
+watch:
+  poll_interval: 5

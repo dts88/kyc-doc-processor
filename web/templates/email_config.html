@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}KYC Settings - Email Config{% endblock %}
+{% block content %}
+<h1>Email / SMTP Configuration</h1>
+
+<div class="form-section">
+    <form method="post">
+        <input type="hidden" name="action" value="save">
+        <div class="form-row">
+            <label>SMTP Host</label>
+            <input type="text" name="smtp_host" value="{{ smtp.smtp_host }}" placeholder="smtp.example.com">
+        </div>
+        <div class="form-row">
+            <label>SMTP Port</label>
+            <input type="number" name="smtp_port" value="{{ smtp.smtp_port or '587' }}" placeholder="587">
+        </div>
+        <div class="form-row">
+            <label>SMTP User</label>
+            <input type="text" name="smtp_user" value="{{ smtp.smtp_user }}" placeholder="user@example.com">
+        </div>
+        <div class="form-row">
+            <label>SMTP Password</label>
+            <input type="password" name="smtp_password" value="{{ smtp.smtp_password }}" placeholder="password">
+        </div>
+        <div class="form-row">
+            <label>From Address</label>
+            <input type="email" name="smtp_from_address" value="{{ smtp.smtp_from_address }}" placeholder="kyc-system@example.com">
+        </div>
+        <button type="submit" class="btn-primary">Save Settings</button>
+    </form>
+</div>
+
+<h2>Actions</h2>
+<div class="form-section" style="display: flex; gap: 10px;">
+    <form method="post" style="display:inline;">
+        <input type="hidden" name="action" value="test">
+        <button type="submit" class="btn-success">Send Test Email</button>
+    </form>
+    <form method="post" style="display:inline;">
+        <input type="hidden" name="action" value="import_yaml">
+        <button type="submit" class="btn-secondary">Import from config.yaml</button>
+    </form>
+</div>
+
+<div class="info-box">
+    <strong>Note:</strong> "Send Test Email" will send a test message to the first KYC team member.
+    Make sure at least one KYC team member is configured in the <a href="{{ url_for('kyc_team.kyc_team_list') }}">KYC Team</a> page.
+</div>
+{% endblock %}

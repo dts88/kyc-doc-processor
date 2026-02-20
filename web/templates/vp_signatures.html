@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}KYC Settings - VP Signatures{% endblock %}
+{% block content %}
+<h1>VP Signature Management</h1>
+
+<div class="stat-cards">
+    <div class="stat-card {{ 'ok' if active_vp_count > 0 else 'warn' }}">
+        <div class="number">{{ active_vp_count }}</div>
+        <div class="label">Active VP Signatures</div>
+    </div>
+</div>
+
+{% if signed_forms %}
+<h2>Record from Verified Form</h2>
+<div class="form-section">
+    <form method="post" class="form-inline">
+        <input type="hidden" name="action" value="record">
+        <div class="form-row" style="flex: 3;">
+            <label>Select Verified Onboarding Form</label>
+            <select name="file_id" required>
+                <option value="">-- Select a form --</option>
+                {% for form in signed_forms %}
+                <option value="{{ form.file_id }}">
+                    #{{ form.file_id }} - {{ form.filename }} ({{ form.company }}) - VP: {{ form.vp_name }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn-success">Record Signature</button>
+    </form>
+</div>
+{% endif %}
+
+<h2>Manual Add</h2>
+<div class="form-section">
+    <form method="post" class="form-inline">
+        <input type="hidden" name="action" value="manual_add">
+        <div class="form-row">
+            <label>VP Name</label>
+            <input type="text" name="vp_name" required placeholder="VP full name">
+        </div>
+        <button type="submit" class="btn-primary">Add VP Signature</button>
+    </form>
+</div>
+
+<h2>VP Signature Records</h2>
+{% if signatures %}
+<table>
+    <thead>
+        <tr>
+            <th>VP Name</th>
+            <th>Source</th>
+            <th>Verified At</th>
+            <th>Status</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for sig in signatures %}
+        <tr>
+            <td>{{ sig.vp_name }}</td>
+            <td>{{ sig.source_description or '-' }}</td>
+            <td>{{ sig.verified_at }}</td>
+            <td>{{ "Active" if sig.is_active else "Inactive" }}</td>
+            <td>
+                {% if sig.is_active %}
+                <form method="post" style="display:inline;" onsubmit="return confirm('Deactivate this VP signature?')">
+                    <input type="hidden" name="action" value="deactivate">
+                    <input type="hidden" name="sig_id" value="{{ sig.id }}">
+                    <button type="submit" class="btn-danger btn-sm">Deactivate</button>
+                </form>
+                {% else %}
+                <span style="color: #95a5a6;">Inactive</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: #7f8c8d; margin-top: 10px;">No VP signatures recorded yet.</p>
+{% endif %}
+{% endblock %}

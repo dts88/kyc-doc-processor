@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}KYC Settings - KYC Team{% endblock %}
+{% block content %}
+<h1>KYC Team Members</h1>
+
+<div class="info-box">
+    KYC team members will receive:<br>
+    1. Completed package notifications (when all KYC documents are collected)<br>
+    2. Manual review notifications (when files need human verification)
+</div>
+
+<h2>Add Team Member</h2>
+<div class="form-section">
+    <form method="post" class="form-inline">
+        <input type="hidden" name="action" value="add">
+        <div class="form-row">
+            <label>Name</label>
+            <input type="text" name="name" required placeholder="Full name">
+        </div>
+        <div class="form-row">
+            <label>Email</label>
+            <input type="email" name="email" required placeholder="user@company.com">
+        </div>
+        <div class="form-row">
+            <label>Role</label>
+            <select name="role">
+                <option value="kyc_reviewer">KYC Reviewer</option>
+                <option value="compliance_officer">Compliance Officer</option>
+            </select>
+        </div>
+        <button type="submit" class="btn-primary">Add Member</button>
+    </form>
+</div>
+
+<h2>Current Team ({{ members | length }})</h2>
+{% if members %}
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Added</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for m in members %}
+        <tr>
+            <td>{{ m.name }}</td>
+            <td>{{ m.email }}</td>
+            <td>{{ m.role | replace('_', ' ') | title }}</td>
+            <td>{{ m.added_at }}</td>
+            <td>
+                <form method="post" style="display:inline;" onsubmit="return confirm('Remove this team member?')">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="member_id" value="{{ m.id }}">
+                    <button type="submit" class="btn-danger btn-sm">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: #7f8c8d; margin-top: 10px;">No KYC team members configured yet.</p>
+{% endif %}
+{% endblock %}
