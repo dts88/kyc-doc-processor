@@ -13,6 +13,17 @@ CLASSIFICATION_USER_PROMPT = f"""Analyze the following document and classify it.
 ## Document Types
 {DOC_TYPE_DESCRIPTIONS}
 
+## Documents That Are NOT KYC Documents
+The following types of documents do NOT belong to any KYC category above and must be classified as "unknown":
+- Company profiles, company introductions, or corporate brochures (公司简介/宣传册)
+- Product catalogues or service brochures
+- ISO certificates, quality management certificates, or other industry certifications (e.g. ISO 9001, ISO 14001)
+- Marketing materials, advertisements, or promotional flyers
+- Internal memos, general correspondence, or cover letters
+- Press releases, news articles, or media clippings
+- Employee handbooks, HR policies, or training materials
+- General contracts, purchase orders, or invoices (unless they serve as source-of-funds evidence)
+
 ## Instructions
 1. Determine ALL applicable document types from the list above. A single document may satisfy multiple KYC requirements.
    - For example, Articles of Incorporation may also contain M&A (公司章程) content like general provisions, shareholder meeting rules, etc.
@@ -20,6 +31,10 @@ CLASSIFICATION_USER_PROMPT = f"""Analyze the following document and classify it.
 2. List the primary document type first, then any additional types the document also covers.
 3. Extract the company name this document belongs to.
 4. Assess your confidence level (0.0 to 1.0).
+5. Confidence calibration rules:
+   - If the document clearly does NOT match any KYC document type (e.g. company brochure, ISO certificate, marketing material), you MUST classify it as ["unknown"] with confidence <= 0.3.
+   - Only use high confidence (0.8+) when the document clearly and unambiguously matches one or more KYC document types based on the key features described above.
+   - For borderline cases, use moderate confidence (0.4-0.7) and explain your uncertainty in the reasoning.
 
 ## Response Format (JSON only)
 {{
@@ -33,7 +48,7 @@ If the document only matches one type, return a single-element array: ["<type>"]
 If you cannot determine the document type, use ["unknown"].
 If you cannot determine the company name, use "unknown".
 
-## Document Content:
+{{few_shot_block}}## Document Content:
 {{content}}"""
 
 # Per-document-type extraction prompts

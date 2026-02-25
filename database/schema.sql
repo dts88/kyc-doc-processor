@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS submitted_files (
     mime_type TEXT,
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'processing', 'classified', 'extraction_done',
-                          'needs_review', 'error', 'duplicate')),
+                          'needs_review', 'error', 'duplicate', 'packaged')),
     error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -162,6 +162,16 @@ CREATE TABLE IF NOT EXISTS vp_signatures (
     source_description TEXT,
     verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_active INTEGER NOT NULL DEFAULT 1
+);
+
+-- Classification corrections for few-shot learning (independent of production data)
+CREATE TABLE IF NOT EXISTS classification_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_filename TEXT NOT NULL,
+    content_excerpt TEXT,            -- first ~1000 chars of document content for content-based learning
+    machine_doc_type TEXT,           -- what the machine classified it as (code or NULL for unknown)
+    correct_doc_type TEXT NOT NULL,  -- what the human corrected it to (code)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- KYC/Risk team member emails

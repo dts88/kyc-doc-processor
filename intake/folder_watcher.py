@@ -41,6 +41,11 @@ class InboxHandler(FileSystemEventHandler):
         self._handle_file(Path(event.dest_path))
 
     def _handle_file(self, file_path: Path):
+        # Skip Windows Zone.Identifier metadata files (created when copying from Windows to WSL)
+        if "Zone.Identifier" in file_path.name:
+            logger.debug("Ignoring Zone.Identifier file: %s", file_path.name)
+            return
+
         if file_path.suffix.lower() not in self.supported_extensions:
             logger.debug("Ignoring unsupported file: %s", file_path.name)
             return
@@ -118,6 +123,8 @@ def scan_existing_files(
     file_ids = []
 
     for file_path in sorted(inbox_dir.iterdir()):
+        if "Zone.Identifier" in file_path.name:
+            continue
         if file_path.is_file() and file_path.suffix.lower() in supported:
             file_id = register_file(db, file_path, processing_dir)
             if file_id:

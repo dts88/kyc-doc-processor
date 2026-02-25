@@ -40,14 +40,8 @@ def register_file(
     file_hash = compute_file_hash(file_path)
 
     if is_duplicate(db, file_hash):
-        logger.info("Duplicate file detected (hash=%s): %s", file_hash[:12], file_path.name)
-        # Mark as duplicate if we want to keep a record
-        db.execute_insert(
-            """INSERT INTO submitted_files
-               (original_filename, file_path, file_size, file_hash, status)
-               VALUES (?, ?, ?, ?, 'duplicate')""",
-            (file_path.name, str(file_path), file_path.stat().st_size, file_hash),
-        )
+        logger.info("Duplicate file detected (hash=%s): %s — deleting", file_hash[:12], file_path.name)
+        file_path.unlink(missing_ok=True)
         return None
 
     # Detect MIME type

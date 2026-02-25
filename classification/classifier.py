@@ -43,6 +43,7 @@ def classify_document(
     max_retries: int = 3,
     retry_base_delay: float = 1.0,
     max_images: int = DEFAULT_MAX_CLASSIFICATION_IMAGES,
+    few_shot_examples: str = "",
 ) -> ClassificationResult:
     """Classify a document using Claude API.
 
@@ -74,6 +75,9 @@ def classify_document(
 
     # Build prompt text
     prompt_text = CLASSIFICATION_USER_PROMPT.replace(
+        "{few_shot_block}",
+        few_shot_examples,
+    ).replace(
         "{content}",
         text_content if text_content else "[See attached image(s)]",
     )

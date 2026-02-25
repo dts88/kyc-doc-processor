@@ -28,6 +28,8 @@ KYC_DOC_TYPES = [
      "Internal application form with VP signature (scanned PDF) or confirmed via VP email"),
     (10, "source_of_funds", "Source of Funds Proof", "资金来源证明", 0, 10,
      "Documentary evidence of source of funds (optional)"),
+    (11, "others", "Others", "其他文件", 0, 99,
+     "Other documents belonging to this counterparty that do not fit any KYC category (manual-only)"),
 ]
 
 

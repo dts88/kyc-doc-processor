@@ -136,10 +136,19 @@ def process():
         db.close()
         return
 
-    # Process each file through the pipeline
-    import anthropic
-
-    client = anthropic.Anthropic()
+    # Initialize Claude backend: prefer Anthropic API, fall back to Claude Code CLI
+    client = None
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        # Reject empty, placeholder, or obviously invalid keys
+        key = client.api_key or ""
+        if not key or key.startswith("your-") or len(key) < 20:
+            raise ValueError("Missing or placeholder API key")
+        click.echo("  Using Anthropic API backend")
+    except Exception:
+        client = None
+        click.echo("  Using Claude Code CLI backend (no Anthropic API key)")
 
     for file_id in all_pending_ids:
         try:
@@ -159,10 +168,12 @@ def process():
 
 
 def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int):
-    """Run a single file through the full pipeline."""
-    from classification.classifier import classify_document
-    from classification.doc_types import CODE_TO_ID, DOC_TYPES
-    from extraction.extractor import extract_document_data
+    """Run a single file through the full pipeline.
+
+    If client is a valid Anthropic client, uses the API directly.
+    If client is None, falls back to Claude Code CLI subprocess.
+    """
+    from classification.doc_types import CODE_TO_ID, DOC_TYPES, UNCLASSIFIED_FOLDER
     from processing.file_converter import convert_file
     from tracking.counterparty_tracker import find_or_create_counterparty, update_checklist
 
@@ -205,17 +216,32 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
     cls_model = config["claude"]["classification_model"]
     max_retries = config["claude"]["max_retries"]
     retry_delay = config["claude"]["retry_base_delay"]
-
     max_cls_images = config.get("classification", {}).get("max_classification_images", 5)
-    classification = classify_document(
-        client,
-        text_content=result.text_content,
-        image_paths=result.image_paths if result.image_paths else None,
-        model=cls_model,
-        max_retries=max_retries,
-        retry_base_delay=retry_delay,
-        max_images=max_cls_images,
-    )
+
+    # Build few-shot examples from manual corrections
+    from classification.few_shot import get_few_shot_examples
+    few_shot_examples = get_few_shot_examples(db)
+
+    if client is not None:
+        from classification.classifier import classify_document
+        classification = classify_document(
+            client,
+            text_content=result.text_content,
+            image_paths=result.image_paths if result.image_paths else None,
+            model=cls_model,
+            max_retries=max_retries,
+            retry_base_delay=retry_delay,
+            max_images=max_cls_images,
+            few_shot_examples=few_shot_examples,
+        )
+    else:
+        from classification.claude_code_classifier import classify_with_claude_code
+        classification = classify_with_claude_code(
+            text_content=result.text_content,
+            image_paths=result.image_paths if result.image_paths else None,
+            model="sonnet",
+            few_shot_examples=few_shot_examples,
+        )
 
     types_str = ", ".join(classification.doc_types)
     click.echo(
@@ -236,14 +262,83 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
         from notification.notifier import send_review_notification
         send_review_notification(db, file_id, file_info["original_filename"], reason)
 
+    # Unknown company → needs review (cannot assign to any counterparty)
+    if not classification.company_name or classification.company_name.lower() == "unknown":
+        reason = "Could not identify counterparty from document"
+        db.execute(
+            "UPDATE submitted_files SET status = 'needs_review', error_message = ? WHERE id = ?",
+            (reason, file_id),
+        )
+        click.echo(f"  -> Unknown company, flagged for manual review")
+        from notification.notifier import send_review_notification
+        send_review_notification(db, file_id, file_info["original_filename"], reason)
+        return
+
     # Find or create counterparty
     fuzzy_threshold = config["classification"]["fuzzy_match_threshold"]
     counterparty_id = find_or_create_counterparty(
         db, classification.company_name, fuzzy_threshold=fuzzy_threshold
     )
 
+    # --- Handle unknown / unclassified doc types ---
+    primary_type = classification.primary_doc_type
+    is_unknown = (classification.doc_types == ["unknown"])
+
+    if is_unknown:
+        # File belongs to a company but doesn't match any KYC doc type
+        # → move to 00_unclassified folder
+        cp_rows = db.execute("SELECT slug FROM counterparties WHERE id = ?", (counterparty_id,))
+        slug = cp_rows[0]["slug"] if cp_rows else "_unassigned"
+        classified_dir = resolve_path(config, "classified")
+        dest_dir = classified_dir / slug / UNCLASSIFIED_FOLDER
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / file_path.name
+        if not dest_path.exists():
+            shutil.move(str(file_path), str(dest_path))
+        db.execute(
+            "UPDATE submitted_files SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (str(dest_path), file_id),
+        )
+
+        # Save classification record (doc_type_id=NULL for unknown)
+        cls_id = db.execute_insert(
+            """INSERT OR REPLACE INTO document_classifications
+               (file_id, doc_type_id, counterparty_id, detected_company_name,
+                confidence, is_primary, model_used, input_tokens, output_tokens, raw_response)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                file_id, None, counterparty_id,
+                classification.company_name, classification.confidence,
+                1, classification.model_used,
+                classification.input_tokens, classification.output_tokens,
+                classification.raw_response,
+            ),
+        )
+
+        reason = f"Unclassified document — copied to {slug}/{UNCLASSIFIED_FOLDER}/"
+        db.execute(
+            "UPDATE submitted_files SET status = 'needs_review', error_message = ? WHERE id = ?",
+            (reason, file_id),
+        )
+
+        # Notify KYC team
+        from notification.notifier import send_review_notification
+        send_review_notification(db, file_id, file_info["original_filename"], reason)
+
+        click.echo(f"  -> Unknown type, copied to {slug}/{UNCLASSIFIED_FOLDER}/")
+        click.echo(f"  Skipping extraction for unclassified document")
+        return
+
+    # --- Normal path: known doc types ---
+
+    # Clean up stale data from prior failed attempts (extraction_results FK
+    # blocks INSERT OR REPLACE on document_classifications, so delete first)
+    db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))
+    db.execute("DELETE FROM document_classifications WHERE file_id = ?", (file_id,))
+
     # Save classification records for ALL applicable doc_types
     classification_ids = {}  # doc_type_code -> classification_id
+    primary_dest = file_path  # track file location after move
     for i, doc_type_code in enumerate(classification.doc_types):
         doc_type_id = CODE_TO_ID.get(doc_type_code)
         is_primary = 1 if i == 0 else 0
@@ -262,42 +357,54 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
         )
         classification_ids[doc_type_code] = cls_id
 
-        # Copy file to classified directory for each type
+        # Move/copy file to classified directory for each type
         if doc_type_id and doc_type_code in DOC_TYPES:
             cp_rows = db.execute("SELECT slug FROM counterparties WHERE id = ?", (counterparty_id,))
             if cp_rows:
-                classified_dir = resolve_path(load_config(), "classified")
+                classified_dir = resolve_path(config, "classified")
                 doc_type_info = DOC_TYPES[doc_type_code]
                 dest_dir = classified_dir / cp_rows[0]["slug"] / doc_type_info.folder_name
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest_path = dest_dir / file_path.name
                 if not dest_path.exists():
-                    shutil.copy2(str(file_path), str(dest_path))
+                    if is_primary:
+                        shutil.move(str(file_path), str(dest_path))
+                    else:
+                        # Multi-type: primary was already moved, copy from new location
+                        shutil.copy2(str(primary_dest), str(dest_path))
+                if is_primary:
+                    primary_dest = dest_path
 
     db.execute(
-        "UPDATE submitted_files SET status = 'classified', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (file_id,),
+        "UPDATE submitted_files SET status = 'classified', file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (str(primary_dest), file_id),
     )
 
     # 4. EXTRACTION — run for primary doc_type only
-    primary_type = classification.primary_doc_type
-    if primary_type == "unknown":
-        click.echo("  Skipping extraction for unknown document type")
-        return
-
     click.echo(f"  [4] Extracting structured data (primary type: {primary_type})...")
     max_ext_images = config.get("classification", {}).get("max_extraction_images", 10)
-    extraction = extract_document_data(
-        client,
-        doc_type=primary_type,
-        text_content=result.text_content,
-        image_paths=result.image_paths if result.image_paths else None,
-        model_simple=config["claude"]["extraction_model_simple"],
-        model_complex=config["claude"]["extraction_model_complex"],
-        max_retries=max_retries,
-        retry_base_delay=retry_delay,
-        max_images=max_ext_images,
-    )
+
+    if client is not None:
+        from extraction.extractor import extract_document_data
+        extraction = extract_document_data(
+            client,
+            doc_type=primary_type,
+            text_content=result.text_content,
+            image_paths=result.image_paths if result.image_paths else None,
+            model_simple=config["claude"]["extraction_model_simple"],
+            model_complex=config["claude"]["extraction_model_complex"],
+            max_retries=max_retries,
+            retry_base_delay=retry_delay,
+            max_images=max_ext_images,
+        )
+    else:
+        from extraction.claude_code_extractor import extract_with_claude_code
+        extraction = extract_with_claude_code(
+            doc_type=primary_type,
+            text_content=result.text_content,
+            image_paths=result.image_paths if result.image_paths else None,
+            model="sonnet",
+        )
 
     if extraction.validation_errors:
         click.echo(f"  Validation warnings: {extraction.validation_errors}")
@@ -325,13 +432,48 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
         (file_id,),
     )
 
+    # Clean up conversion artifacts from classified directory
+    _cleanup_conversion_artifacts(result.image_paths, primary_dest)
+
     # Update checklist for ALL applicable doc_types
     for doc_type_code in classification.doc_types:
         doc_type_id = CODE_TO_ID.get(doc_type_code)
         if doc_type_id and counterparty_id:
             update_checklist(db, counterparty_id, doc_type_id, file_id)
 
+    # If counterparty was already packaged, reset to trigger re-packaging
+    _reset_if_completed(db, counterparty_id)
+
     click.echo(f"  Done. Types: [{types_str}] | Extraction validated: {extraction.validated}")
+
+
+def _reset_if_completed(db, counterparty_id: int):
+    """If counterparty is already 'completed' (packaged), reset to 'in_progress'
+    so that check_and_package will re-package with the new file included."""
+    rows = db.execute(
+        "SELECT status FROM counterparties WHERE id = ?", (counterparty_id,)
+    )
+    if rows and rows[0]["status"] == "completed":
+        db.execute(
+            "UPDATE counterparties SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (counterparty_id,),
+        )
+        logger.info("Reset counterparty #%d to in_progress for re-packaging", counterparty_id)
+
+
+def _cleanup_conversion_artifacts(image_paths: list | None, original_path):
+    """Remove temporary image files generated during conversion."""
+    if not image_paths:
+        return
+    original_path = Path(original_path)
+    for img in image_paths:
+        try:
+            img = Path(img)
+            if img.exists() and img.resolve() != original_path.resolve():
+                img.unlink()
+                logger.debug("Cleaned up conversion artifact: %s", img)
+        except Exception as e:
+            logger.warning("Could not remove conversion artifact %s: %s", img, e)
 
 
 def _check_and_package(config: dict, db: DatabaseManager):
@@ -390,19 +532,19 @@ def watch():
     click.echo(f"Watching inbox: {inbox_dir}")
     click.echo("Press Ctrl+C to stop.\n")
 
-    import anthropic
+    client = None
     try:
+        import anthropic
         client = anthropic.Anthropic()
+        if not client.api_key:
+            raise ValueError("Empty API key")
+        click.echo("Using Anthropic API backend\n")
     except Exception:
         client = None
-        click.echo("WARNING: Anthropic API key not configured. Files will be registered but not auto-processed.")
-        click.echo("         Use 'python main.py process' manually after configuring the API key.\n")
+        click.echo("Using Claude Code CLI backend (no Anthropic API key)\n")
 
     def on_new_file(file_id):
         click.echo(f"\nNew file registered: #{file_id}")
-        if client is None:
-            click.echo(f"  Skipping auto-processing (no API key)")
-            return
         try:
             _process_single_file(config, db, client, file_id)
             _check_and_package(config, db)
@@ -419,9 +561,21 @@ def watch():
         supported_extensions=supported_ext,
     )
 
+    # Periodically check for completed counterparties (e.g. after web assign)
+    check_interval = config.get("watch", {}).get("poll_interval", 5)
+    package_check_interval = 30  # seconds between completion checks
+    seconds_since_check = 0
+
     try:
         while True:
-            time.sleep(1)
+            time.sleep(check_interval)
+            seconds_since_check += check_interval
+            if seconds_since_check >= package_check_interval:
+                seconds_since_check = 0
+                try:
+                    _check_and_package(config, db)
+                except Exception:
+                    logger.exception("Error during periodic completion check")
     except KeyboardInterrupt:
         click.echo("\nStopping watcher...")
         observer.stop()
@@ -530,10 +684,18 @@ def reprocess(file_id):
     db.execute("DELETE FROM document_classifications WHERE file_id = ?", (file_id,))
     db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))
 
-    # Reprocess
-    import anthropic
+    # Initialize backend
+    client = None
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        if not client.api_key:
+            raise ValueError("Empty API key")
+        click.echo("Using Anthropic API backend")
+    except Exception:
+        client = None
+        click.echo("Using Claude Code CLI backend")
 
-    client = anthropic.Anthropic()
     try:
         _process_single_file(config, db, client, file_id)
         click.echo("Reprocessing complete.")
@@ -620,6 +782,7 @@ def assign(file_id, doc_type_codes, counterparty):
     This bypasses Claude classification and directly updates the checklist.
     """
     from classification.doc_types import CODE_TO_ID, DOC_TYPES
+    from processing.file_converter import convert_file
     from tracking.counterparty_tracker import find_or_create_counterparty, update_checklist
 
     config = load_config()
@@ -658,12 +821,33 @@ def assign(file_id, doc_type_codes, counterparty):
     fuzzy_threshold = config["classification"]["fuzzy_match_threshold"]
     counterparty_id = find_or_create_counterparty(db, counterparty, fuzzy_threshold=fuzzy_threshold)
 
+    # Record correction for few-shot learning (before deleting old classifications)
+    from classification.few_shot import record_correction
+    machine_rows = db.execute(
+        """SELECT dt.code FROM document_classifications dc
+           LEFT JOIN kyc_doc_types dt ON dc.doc_type_id = dt.id
+           WHERE dc.file_id = ? AND dc.model_used NOT IN ('manual', 'manual_web')
+           ORDER BY dc.classified_at ASC LIMIT 1""",
+        (file_id,),
+    )
+    machine_type = machine_rows[0]["code"] if machine_rows else None
+    for code in doc_type_codes:
+        if code != "others":
+            record_correction(db, file_info["original_filename"], machine_type, code,
+                              file_path=file_info["file_path"])
+
+    # Clear previous classifications and extraction results
+    db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))
+    db.execute("DELETE FROM document_classifications WHERE file_id = ?", (file_id,))
+
     # Save classification for each doc type
+    current_path = Path(file_info["file_path"])
+    primary_cls_id = None
     for i, code in enumerate(doc_type_codes):
         doc_type_id = CODE_TO_ID[code]
         is_primary = 1 if i == 0 else 0
 
-        db.execute_insert(
+        cls_id = db.execute_insert(
             """INSERT OR REPLACE INTO document_classifications
                (file_id, doc_type_id, counterparty_id, detected_company_name,
                 confidence, is_primary, model_used, input_tokens, output_tokens, raw_response)
@@ -672,26 +856,31 @@ def assign(file_id, doc_type_codes, counterparty):
              1.0, is_primary, "manual",
              f"Manually assigned: {', '.join(doc_type_codes)}"),
         )
+        if i == 0:
+            primary_cls_id = cls_id
 
         # Update checklist
         update_checklist(db, counterparty_id, doc_type_id, file_id)
 
-        # Copy to classified directory
+        # Move/copy to classified directory
         cp_rows = db.execute("SELECT slug FROM counterparties WHERE id = ?", (counterparty_id,))
         if cp_rows:
             classified_dir = resolve_path(config, "classified")
             doc_type_info = DOC_TYPES[code]
             dest_dir = classified_dir / cp_rows[0]["slug"] / doc_type_info.folder_name
             dest_dir.mkdir(parents=True, exist_ok=True)
-            src = Path(file_info["file_path"])
-            dest = dest_dir / src.name
-            if src.exists() and not dest.exists():
-                shutil.copy2(str(src), str(dest))
+            dest = dest_dir / current_path.name
+            if current_path.exists() and not dest.exists():
+                if i == 0:
+                    shutil.move(str(current_path), str(dest))
+                    current_path = dest
+                else:
+                    shutil.copy2(str(current_path), str(dest))
 
-    # Update file status
+    # Update file status and path
     db.execute(
-        "UPDATE submitted_files SET status = 'classified', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (file_id,),
+        "UPDATE submitted_files SET status = 'classified', file_path = ?, error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (str(current_path), file_id),
     )
 
     types_str = ", ".join(doc_type_codes)
@@ -699,11 +888,98 @@ def assign(file_id, doc_type_codes, counterparty):
     click.echo(f"  Types: [{types_str}]")
     click.echo(f"  Counterparty: {counterparty} (#{counterparty_id})")
 
-    # Check completion
-    from tracking.completion_checker import check_completion
-    if check_completion(db, counterparty_id):
-        click.echo(f"  ** Counterparty #{counterparty_id} is now COMPLETE! Run 'python main.py process' to package.")
+    # Run extraction on primary doc type
+    primary_type = doc_type_codes[0]
+    from classification.prompts import EXTRACTION_PROMPTS
+    if primary_type in EXTRACTION_PROMPTS:
+        click.echo(f"  Extracting structured data (type: {primary_type})...")
+        try:
+            scan_dpi = config["processing"]["scan_dpi"]
+            max_dim = config["processing"]["max_image_dimension"]
+            result = convert_file(current_path, scan_dpi=scan_dpi, max_image_dim=max_dim)
 
+            if result.error:
+                click.echo(f"  Extraction skipped (conversion error): {result.error}")
+            else:
+                client = None
+                try:
+                    import anthropic
+                    client = anthropic.Anthropic()
+                    if not client.api_key:
+                        raise ValueError("Empty")
+                except Exception:
+                    client = None
+
+                max_ext_images = config.get("classification", {}).get("max_extraction_images", 10)
+                if client is not None:
+                    from extraction.extractor import extract_document_data
+                    extraction = extract_document_data(
+                        client,
+                        doc_type=primary_type,
+                        text_content=result.text_content,
+                        image_paths=result.image_paths if result.image_paths else None,
+                        model_simple=config["claude"]["extraction_model_simple"],
+                        model_complex=config["claude"]["extraction_model_complex"],
+                        max_retries=config["claude"]["max_retries"],
+                        retry_base_delay=config["claude"]["retry_base_delay"],
+                        max_images=max_ext_images,
+                    )
+                else:
+                    from extraction.claude_code_extractor import extract_with_claude_code
+                    extraction = extract_with_claude_code(
+                        doc_type=primary_type,
+                        text_content=result.text_content,
+                        image_paths=result.image_paths if result.image_paths else None,
+                        model="sonnet",
+                    )
+
+                db.execute_insert(
+                    """INSERT OR REPLACE INTO extraction_results
+                       (file_id, classification_id, extracted_data, validation_passed,
+                        validation_errors, model_used, input_tokens, output_tokens, raw_response)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        file_id, primary_cls_id,
+                        json.dumps(extraction.extracted_data, ensure_ascii=False),
+                        1 if extraction.validated else 0,
+                        json.dumps(extraction.validation_errors),
+                        extraction.model_used,
+                        extraction.input_tokens, extraction.output_tokens,
+                        extraction.raw_response,
+                    ),
+                )
+                db.execute(
+                    "UPDATE submitted_files SET status = 'extraction_done', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (file_id,),
+                )
+                click.echo(f"  Extraction done (validated: {extraction.validated})")
+
+                # Clean up conversion artifacts
+                _cleanup_conversion_artifacts(result.image_paths, current_path)
+        except Exception as e:
+            click.echo(f"  Extraction failed: {e}")
+            logger.exception("Extraction failed for file #%d", file_id)
+
+    # If counterparty was already packaged, reset to trigger re-packaging
+    _reset_if_completed(db, counterparty_id)
+
+    # Check completion and auto-package
+    _check_and_package(config, db)
+
+    db.close()
+
+
+@cli.command()
+def package():
+    """Check for completed counterparties and package them.
+
+    Scans all in-progress counterparties, packages those with all required
+    documents, and sends notifications. Safe to run multiple times — already
+    packaged counterparties (status='completed') are skipped.
+    """
+    config = load_config()
+    db = get_db(config)
+    _check_and_package(config, db)
     db.close()
 
 

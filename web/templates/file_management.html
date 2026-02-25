@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}KYC Settings - File Management{% endblock %}
+{% block content %}
+<h1>File Management</h1>
+
+<!-- A. Stat Cards -->
+<div class="stat-cards">
+    <div class="stat-card">
+        <div class="number">{{ stats.total }}</div>
+        <div class="label">Total Files</div>
+        <a href="{{ url_for('file_mgmt.file_list', status='all') }}">View all</a>
+    </div>
+    <div class="stat-card warn">
+        <div class="number">{{ stats.needs_review }}</div>
+        <div class="label">Needs Review</div>
+        <a href="{{ url_for('file_mgmt.file_list', status='needs_review') }}">View</a>
+    </div>
+    <div class="stat-card off">
+        <div class="number">{{ stats.error }}</div>
+        <div class="label">Errors</div>
+        <a href="{{ url_for('file_mgmt.file_list', status='error') }}">View</a>
+    </div>
+    <div class="stat-card ok">
+        <div class="number">{{ stats.classified }}</div>
+        <div class="label">Classified</div>
+        <a href="{{ url_for('file_mgmt.file_list', status='classified') }}">View</a>
+    </div>
+    <div class="stat-card ok">
+        <div class="number">{{ stats.extraction_done }}</div>
+        <div class="label">Extracted</div>
+        <a href="{{ url_for('file_mgmt.file_list', status='extraction_done') }}">View</a>
+    </div>
+    <div class="stat-card" style="border-left: 4px solid #2980b9;">
+        <div class="number">{{ stats.packaged }}</div>
+        <div class="label">Packaged</div>
+        <a href="{{ url_for('file_mgmt.file_list', status='packaged') }}">View</a>
+    </div>
+</div>
+
+<!-- B. Counterparty Progress Matrix -->
+<h2>Counterparty Progress</h2>
+{% if progress %}
+<div style="overflow-x: auto;">
+<table>
+    <thead>
+        <tr>
+            <th>Counterparty</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th title="Company Registration (Bizfile)">BF</th>
+            <th title="Incorporation Documents">IC</th>
+            <th title="Memorandum and Articles of Association">MA</th>
+            <th title="Shareholders & Directors List">SD</th>
+            <th title="Ownership/Org Structure Chart">OS</th>
+            <th title="Financial Reports">FR</th>
+            <th title="Bank Account Reference">BR</th>
+            <th title="KYC Questionnaire">KQ</th>
+            <th title="Counterparty On-boarding Application Form">OB</th>
+            <th title="Source of Funds Proof">SF</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for cp in progress %}
+        {% if cp %}
+        <tr class="{{ 'complete' if cp.is_complete else '' }}">
+            <td><strong>{{ cp.name }}</strong><br><small style="color:#999">#{{ cp.counterparty_id }}</small></td>
+            <td>{{ cp.status }}</td>
+            <td>{{ cp.progress }}</td>
+            {% for doc in cp.documents %}
+            <td class="status-{{ doc.status }}" style="text-align:center">
+                {% if doc.status == 'received' or doc.status == 'verified' %}&#10004;{% elif doc.status == 'missing' %}&#10008;{% else %}?{% endif %}
+            </td>
+            {% endfor %}
+            <td>
+                <button type="button" class="btn-secondary btn-sm" onclick="fillMergeSource({{ cp.counterparty_id }}, '{{ cp.name }}')">Merge</button>
+            </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p style="color: #7f8c8d;">No counterparties found.</p>
+{% endif %}
+
+<!-- C. File List -->
+<h2>Files
+    {% if status_filter != 'all' %}<small style="font-weight:normal; color:#7f8c8d;">({{ status_filter }})</small>{% endif %}
+    ({{ files | length }})
+</h2>
+
+{% if files %}
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Filename</th>
+            <th>Status</th>
+            <th>Doc Type</th>
+            <th>Company</th>
+            <th>Confidence</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in files %}
+        <tr>
+            <td>{{ f.id }}</td>
+            <td title="{{ f.file_path }}" style="word-break:break-word;">{{ f.original_filename }}</td>
+            <td>
+                {% if f.status == 'packaged' %}<span style="color:#2980b9">{{ f.status }}</span>
+                {% elif f.status == 'extraction_done' %}<span style="color:#27ae60">{{ f.status }}</span>
+                {% elif f.status == 'classified' %}<span style="color:#27ae60">{{ f.status }}</span>
+                {% elif f.status == 'needs_review' %}<span style="color:#e67e22">{{ f.status }}</span>
+                {% elif f.status == 'error' %}<span style="color:#e74c3c">{{ f.status }}</span>
+                {% else %}{{ f.status }}{% endif %}
+                {% if f.error_message %}<br><small style="color:#e74c3c">{{ f.error_message }}</small>{% endif %}
+            </td>
+            <td>{{ f.doc_type_name or '-' }}</td>
+            <td>{{ f.counterparty_name or '-' }}</td>
+            <td>{% if f.confidence is not none %}{{ "%.0f" | format(f.confidence * 100) }}%{% else %}-{% endif %}</td>
+            <td style="white-space:nowrap;">
+                <a href="{{ url_for('file_mgmt.file_view', file_id=f.id) }}" class="btn btn-sm btn-secondary" target="_blank">View</a>
+                <a href="{{ url_for('file_mgmt.file_download', file_id=f.id) }}" class="btn btn-sm btn-primary">Download</a>
+                <button type="button" class="btn-sm btn-success" onclick="toggleAssignForm({{ f.id }})">Assign</button>
+            </td>
+        </tr>
+        <!-- Inline assign form (hidden by default) -->
+        <tr id="assign-row-{{ f.id }}" style="display:none; background:#eaf2f8;">
+            <td colspan="7">
+                <form method="post" action="{{ url_for('file_mgmt.file_action') }}" class="form-inline" style="padding:8px 0;">
+                    <input type="hidden" name="action" value="assign">
+                    <input type="hidden" name="file_id" value="{{ f.id }}">
+                    <div class="form-row">
+                        <label>Doc Type(s)</label>
+                        <select name="doc_types" multiple size="4" required style="min-width:200px;">
+                            {% set current_types = file_doc_types.get(f.id, []) %}
+                            {% for code, dt in doc_types.items() %}
+                            <option value="{{ code }}" {% if code in current_types %}selected{% endif %}>{{ code }} - {{ dt.name_en }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>Counterparty</label>
+                        <input type="text" name="counterparty" placeholder="Company name or slug" value="{{ '' if (f.counterparty_name or '').lower() == 'unknown' else (f.counterparty_name or '') }}" list="counterparty-list">
+                    </div>
+                    <button type="submit" class="btn-success btn-sm">Confirm</button>
+                    <button type="button" class="btn-secondary btn-sm" onclick="toggleAssignForm({{ f.id }})">Cancel</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: #7f8c8d;">No files matching filter.</p>
+{% endif %}
+
+<!-- Counterparty datalist for autocomplete -->
+<datalist id="counterparty-list">
+    {% for cp in counterparties %}
+    <option value="{{ cp.name }}">{{ cp.slug }} (#{{ cp.id }})</option>
+    {% endfor %}
+</datalist>
+
+<!-- D. Merge Counterparties -->
+<h2>Merge Counterparties</h2>
+<div class="form-section">
+    <div class="info-box" style="margin-top:0;">
+        Merge duplicate counterparties into one. All files, classifications, and checklist records
+        from the <strong>source(s)</strong> will be moved to the <strong>target</strong>. The sources will be deleted.
+    </div>
+    <form method="post" action="{{ url_for('file_mgmt.file_action') }}" class="form-inline" onsubmit="return confirm('Are you sure? This will delete the selected source counterparties.')">
+        <input type="hidden" name="action" value="merge">
+        <div class="form-row">
+            <label>Target (keep)</label>
+            <select name="target_id" id="merge-target" required>
+                <option value="">-- Select target --</option>
+                {% for cp in counterparties %}
+                <option value="{{ cp.id }}">#{{ cp.id }} - {{ cp.name }} ({{ cp.slug }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row">
+            <label>Sources (delete)</label>
+            <select name="source_ids" id="merge-source" multiple required size="{{ [counterparties|length, 6]|min }}">
+                {% for cp in counterparties %}
+                <option value="{{ cp.id }}">#{{ cp.id }} - {{ cp.name }} ({{ cp.slug }})</option>
+                {% endfor %}
+            </select>
+            <small style="color:#7f8c8d;">Hold Ctrl/Cmd to select multiple</small>
+        </div>
+        <button type="submit" class="btn-danger">Merge</button>
+    </form>
+</div>
+
+<style>
+    .complete { background: #d5f5e3 !important; }
+    .status-missing { color: #e74c3c; font-weight: bold; }
+    .status-received { color: #27ae60; }
+    .status-verified { color: #2980b9; }
+</style>
+
+<script>
+function toggleAssignForm(fileId) {
+    var row = document.getElementById('assign-row-' + fileId);
+    row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+function fillMergeSource(cpId, cpName) {
+    var sel = document.getElementById('merge-source');
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value == cpId) {
+            sel.selectedIndex = i;
+            break;
+        }
+    }
+    window.scrollTo(0, document.body.scrollHeight);
+}
+</script>
+{% endblock %}

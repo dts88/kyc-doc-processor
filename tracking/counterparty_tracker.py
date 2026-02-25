@@ -29,19 +29,20 @@ def find_or_create_counterparty(
     Returns counterparty ID.
     """
     if not company_name or company_name.lower() == "unknown":
-        # Create/find a special "unknown" counterparty
-        rows = db.execute("SELECT id FROM counterparties WHERE slug = 'unknown'")
-        if rows:
-            return rows[0]["id"]
-        return db.execute_insert(
-            """INSERT INTO counterparties (name, slug, aliases, status)
-               VALUES ('Unknown', 'unknown', '[]', 'in_progress')""",
-        )
+        raise ValueError("Cannot create counterparty with unknown company name — file should be flagged for review")
 
     # Search existing counterparties
     all_counterparties = db.execute(
         "SELECT id, name, slug, aliases FROM counterparties"
     )
+
+    # Exact slug match — catches cases where the input is a slug-style name
+    input_slug = slugify(company_name)
+    for cp in all_counterparties:
+        if cp["slug"] == input_slug:
+            _add_alias(db, cp["id"], company_name)
+            _ensure_checklist(db, cp["id"])
+            return cp["id"]
 
     best_match_id = None
     best_score = 0
@@ -68,6 +69,7 @@ def find_or_create_counterparty(
         )
         # Add as alias if it's a new variant
         _add_alias(db, best_match_id, company_name)
+        _ensure_checklist(db, best_match_id)
         return best_match_id
 
     # Create new counterparty
@@ -119,6 +121,21 @@ def _init_checklist(db: DatabaseManager, counterparty_id: int):
                VALUES (?, ?, 'missing')""",
             (counterparty_id, dt["id"]),
         )
+
+
+def _ensure_checklist(db: DatabaseManager, counterparty_id: int):
+    """Ensure checklist rows exist for an existing counterparty.
+
+    Uses INSERT OR IGNORE so it's safe to call repeatedly — only missing
+    rows are created.
+    """
+    rows = db.execute(
+        "SELECT COUNT(*) AS cnt FROM counterparty_checklist WHERE counterparty_id = ?",
+        (counterparty_id,),
+    )
+    if rows[0]["cnt"] == 0:
+        _init_checklist(db, counterparty_id)
+        logger.info("Re-initialized checklist for counterparty #%d", counterparty_id)
 
 
 def update_checklist(
@@ -202,5 +219,5 @@ def get_counterparty_status(db: DatabaseManager, counterparty_id: int) -> dict:
         "documents": docs,
         "progress": f"{required_received}/{required_total} required",
         "total_received": received,
-        "is_complete": required_received >= required_total,
+        "is_complete": required_total > 0 and required_received >= required_total,
     }
