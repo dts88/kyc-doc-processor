@@ -361,8 +361,14 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
 
     # --- Normal path: known doc types ---
 
-    # Clean up stale data from prior failed attempts (extraction_results FK
-    # blocks INSERT OR REPLACE on document_classifications, so delete first)
+    # Clean up stale data from prior failed attempts
+    # First clear old checklist references so they don't point to stale data
+    db.execute(
+        """UPDATE counterparty_checklist
+           SET status = 'missing', file_id = NULL, updated_at = CURRENT_TIMESTAMP
+           WHERE file_id = ?""",
+        (file_id,),
+    )
     db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))
     db.execute("DELETE FROM document_classifications WHERE file_id = ?", (file_id,))
 
@@ -870,6 +876,14 @@ def assign(file_id, doc_type_codes, counterparty):
         if code != "others":
             record_correction(db, file_info["original_filename"], machine_type, code,
                               file_path=file_info["file_path"])
+
+    # Clear old checklist references before replacing classifications
+    db.execute(
+        """UPDATE counterparty_checklist
+           SET status = 'missing', file_id = NULL, updated_at = CURRENT_TIMESTAMP
+           WHERE file_id = ?""",
+        (file_id,),
+    )
 
     # Clear previous classifications and extraction results
     db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))

@@ -112,7 +112,9 @@ def assign_file_classification(
             record_correction(db, file_info["original_filename"], machine_type, code,
                               file_path=file_info["file_path"])
 
-    # Save new classifications FIRST (keep old records until extraction succeeds)
+    # Clear old checklist references before replacing classifications
+    _clear_old_checklist_refs(db, file_id)
+
     # Delete old extraction results since they belong to old classifications
     db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))
     # Now safe to replace classifications
@@ -186,6 +188,20 @@ def assign_file_classification(
         "extraction": extraction_result,
         "packaged": package_result,
     }
+
+
+def _clear_old_checklist_refs(db: DatabaseManager, file_id: int) -> None:
+    """Reset any checklist entries that reference this file back to 'missing'.
+
+    Called before reassignment so the old counterparty's checklist no longer
+    points to a file that now belongs to a different counterparty.
+    """
+    db.execute(
+        """UPDATE counterparty_checklist
+           SET status = 'missing', file_id = NULL, updated_at = CURRENT_TIMESTAMP
+           WHERE file_id = ?""",
+        (file_id,),
+    )
 
 
 def _run_extraction(
