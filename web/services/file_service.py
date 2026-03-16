@@ -407,6 +407,31 @@ def check_and_package(db: DatabaseManager) -> list[dict]:
     return results
 
 
+def mark_counterparty_delivered(db: DatabaseManager, counterparty_id: int) -> dict:
+    """Mark a completed counterparty as delivered (KYC review done)."""
+    rows = db.execute("SELECT * FROM counterparties WHERE id = ?", (counterparty_id,))
+    if not rows:
+        return {"error": f"Counterparty #{counterparty_id} not found."}
+    cp = rows[0]
+    if cp["status"] not in ("completed", "delivered"):
+        return {"error": f"Counterparty '{cp['name']}' is not yet completed (status: {cp['status']})."}
+
+    db.execute(
+        "UPDATE counterparties SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (counterparty_id,),
+    )
+
+    # Audit log
+    db.execute_insert(
+        """INSERT INTO processing_log (counterparty_id, stage, action, details)
+           VALUES (?, 'tracking', 'mark_delivered_web', ?)""",
+        (counterparty_id, json.dumps({"name": cp["name"]})),
+    )
+
+    logger.info("Marked counterparty #%d (%s) as delivered", counterparty_id, cp["name"])
+    return {"success": True, "name": cp["name"]}
+
+
 def get_counterparty_progress(db: DatabaseManager) -> list[dict]:
     """Get counterparty progress matrix data."""
     return get_all_counterparty_statuses(db)

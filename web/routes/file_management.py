@@ -104,6 +104,16 @@ def file_action():
                         "success",
                     )
 
+        elif action == "mark_delivered":
+            cp_id = request.form.get("counterparty_id", type=int)
+            if cp_id:
+                from web.services.file_service import mark_counterparty_delivered
+                result = mark_counterparty_delivered(db, cp_id)
+                if "error" in result:
+                    flash(result["error"], "error")
+                else:
+                    flash(f"Marked {result['name']} as delivered.", "success")
+
         elif action == "merge":
             target_id = request.form.get("target_id", type=int)
             source_ids = request.form.getlist("source_ids", type=int)

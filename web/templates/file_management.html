@@ -40,13 +40,24 @@
 <!-- B. Counterparty Progress Matrix -->
 <h2>Counterparty Progress</h2>
 {% if progress %}
+<div class="filter-bar">
+    <input type="text" id="cp-search" placeholder="Search counterparty..." oninput="filterCpTable()">
+    <select id="cp-status-filter" onchange="filterCpTable()">
+        <option value="all">All statuses</option>
+        <option value="in_progress" selected>In Progress</option>
+        <option value="completed">Completed (Pending Review)</option>
+        <option value="delivered">Delivered</option>
+    </select>
+    <label class="toggle-label"><input type="checkbox" id="cp-show-delivered" onchange="filterCpTable()"> Show delivered</label>
+</div>
+
 <div style="overflow-x: auto;">
-<table>
+<table id="cp-table">
     <thead>
         <tr>
-            <th>Counterparty</th>
-            <th>Status</th>
-            <th>Progress</th>
+            <th class="sortable" onclick="sortCpTable(0)">Counterparty <span class="sort-icon"></span></th>
+            <th class="sortable" onclick="sortCpTable(1)">Status <span class="sort-icon"></span></th>
+            <th class="sortable" onclick="sortCpTable(2)">Progress <span class="sort-icon"></span></th>
             <th title="Company Registration (Bizfile)">BF</th>
             <th title="Incorporation Documents">IC</th>
             <th title="Memorandum and Articles of Association">MA</th>
@@ -63,16 +74,34 @@
     <tbody>
         {% for cp in progress %}
         {% if cp %}
-        <tr class="{{ 'complete' if cp.is_complete else '' }}">
-            <td><strong>{{ cp.name }}</strong><br><small style="color:#999">#{{ cp.counterparty_id }}</small></td>
-            <td>{{ cp.status }}</td>
+        <tr class="cp-row {{ 'cp-complete' if cp.status == 'completed' else '' }} {{ 'cp-delivered' if cp.status == 'delivered' else '' }}"
+            data-name="{{ cp.name | lower }}"
+            data-status="{{ cp.status }}">
+            <td><strong>{{ cp.name }}</strong><br><small class="text-muted">#{{ cp.counterparty_id }}</small></td>
+            <td>
+                {% if cp.status == 'completed' %}
+                    <span class="badge badge-warn">Pending Review</span>
+                {% elif cp.status == 'delivered' %}
+                    <span class="badge badge-ok">Delivered</span>
+                {% else %}
+                    <span class="badge badge-progress">In Progress</span>
+                {% endif %}
+            </td>
             <td>{{ cp.progress }}</td>
             {% for doc in cp.documents %}
-            <td class="status-{{ doc.status }}" style="text-align:center">
+            <td class="status-{{ doc.status }}" style="text-align:center" title="{{ doc.name }}{% if doc.file %} - {{ doc.file }}{% endif %}">
                 {% if doc.status == 'received' or doc.status == 'verified' %}&#10004;{% elif doc.status == 'missing' %}&#10008;{% else %}?{% endif %}
             </td>
             {% endfor %}
-            <td>
+            <td style="white-space:nowrap;">
+                {% if cp.status == 'completed' %}
+                <form method="post" action="{{ url_for('file_mgmt.file_action') }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="action" value="mark_delivered">
+                    <input type="hidden" name="counterparty_id" value="{{ cp.counterparty_id }}">
+                    <button type="submit" class="btn-primary btn-sm" onclick="return confirm('Mark {{ cp.name }} as delivered?')">Mark Delivered</button>
+                </form>
+                {% endif %}
                 <button type="button" class="btn-secondary btn-sm" onclick="fillMergeSource({{ cp.counterparty_id }}, '{{ cp.name }}')">Merge</button>
             </td>
         </tr>
@@ -82,40 +111,64 @@
 </table>
 </div>
 {% else %}
-<p style="color: #7f8c8d;">No counterparties found.</p>
+<p class="text-muted">No counterparties found.</p>
 {% endif %}
 
 <!-- C. File List -->
 <h2>Files
-    {% if status_filter != 'all' %}<small style="font-weight:normal; color:#7f8c8d;">({{ status_filter }})</small>{% endif %}
-    ({{ files | length }})
+    {% if status_filter != 'all' %}<small style="font-weight:normal;" class="text-muted">({{ status_filter }})</small>{% endif %}
+    (<span id="files-visible-count">{{ files | length }}</span> / {{ files | length }})
 </h2>
 
 {% if files %}
-<table>
+<div class="filter-bar">
+    <input type="text" id="file-search" placeholder="Search filename or company..." oninput="filterFileTable()">
+    <select id="file-status-filter" onchange="filterFileTable()">
+        <option value="all" {{ 'selected' if status_filter == 'all' }}>All statuses</option>
+        <option value="pending" {{ 'selected' if status_filter == 'pending' }}>Pending</option>
+        <option value="needs_review" {{ 'selected' if status_filter == 'needs_review' }}>Needs Review</option>
+        <option value="error" {{ 'selected' if status_filter == 'error' }}>Error</option>
+        <option value="classified" {{ 'selected' if status_filter == 'classified' }}>Classified</option>
+        <option value="extraction_done" {{ 'selected' if status_filter == 'extraction_done' }}>Extracted</option>
+        <option value="packaged" {{ 'selected' if status_filter == 'packaged' }}>Packaged</option>
+    </select>
+    <select id="file-company-filter" onchange="filterFileTable()">
+        <option value="all">All companies</option>
+        {% for cp in counterparties %}
+        <option value="{{ cp.name | lower }}">{{ cp.name }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+<table id="file-table">
     <thead>
         <tr>
-            <th>ID</th>
-            <th>Filename</th>
-            <th>Status</th>
-            <th>Doc Type</th>
-            <th>Company</th>
-            <th>Confidence</th>
+            <th class="sortable" onclick="sortFileTable(0)">ID <span class="sort-icon"></span></th>
+            <th class="sortable" onclick="sortFileTable(1)">Filename <span class="sort-icon"></span></th>
+            <th class="sortable" onclick="sortFileTable(2)">Status <span class="sort-icon"></span></th>
+            <th class="sortable" onclick="sortFileTable(3)">Doc Type <span class="sort-icon"></span></th>
+            <th class="sortable" onclick="sortFileTable(4)">Company <span class="sort-icon"></span></th>
+            <th class="sortable" onclick="sortFileTable(5)">Confidence <span class="sort-icon"></span></th>
             <th>Action</th>
         </tr>
     </thead>
     <tbody>
         {% for f in files %}
-        <tr>
+        <tr class="file-row"
+            data-filename="{{ f.original_filename | lower }}"
+            data-status="{{ f.status }}"
+            data-company="{{ (f.counterparty_name or '') | lower }}"
+            data-doctype="{{ f.doc_type_name or '' }}">
             <td>{{ f.id }}</td>
-            <td title="{{ f.file_path }}" style="word-break:break-word;">{{ f.original_filename }}</td>
+            <td title="{{ f.file_path }}" style="word-break:break-word; max-width:300px;">{{ f.original_filename }}</td>
             <td>
-                {% if f.status == 'packaged' %}<span style="color:#2980b9">{{ f.status }}</span>
-                {% elif f.status == 'extraction_done' %}<span style="color:#27ae60">{{ f.status }}</span>
-                {% elif f.status == 'classified' %}<span style="color:#27ae60">{{ f.status }}</span>
-                {% elif f.status == 'needs_review' %}<span style="color:#e67e22">{{ f.status }}</span>
-                {% elif f.status == 'error' %}<span style="color:#e74c3c">{{ f.status }}</span>
-                {% else %}{{ f.status }}{% endif %}
+                {% if f.status == 'packaged' %}<span class="badge badge-info">{{ f.status }}</span>
+                {% elif f.status == 'extraction_done' %}<span class="badge badge-ok">{{ f.status }}</span>
+                {% elif f.status == 'classified' %}<span class="badge badge-ok">{{ f.status }}</span>
+                {% elif f.status == 'needs_review' %}<span class="badge badge-warn">{{ f.status }}</span>
+                {% elif f.status == 'error' %}<span class="badge badge-err">{{ f.status }}</span>
+                {% elif f.status == 'pending' %}<span class="badge badge-progress">{{ f.status }}</span>
+                {% else %}<span class="badge">{{ f.status }}</span>{% endif %}
                 {% if f.error_message %}<br><small style="color:#e74c3c">{{ f.error_message }}</small>{% endif %}
             </td>
             <td>{{ f.doc_type_name or '-' }}</td>
@@ -123,12 +176,12 @@
             <td>{% if f.confidence is not none %}{{ "%.0f" | format(f.confidence * 100) }}%{% else %}-{% endif %}</td>
             <td style="white-space:nowrap;">
                 <a href="{{ url_for('file_mgmt.file_view', file_id=f.id) }}" class="btn btn-sm btn-secondary" target="_blank">View</a>
-                <a href="{{ url_for('file_mgmt.file_download', file_id=f.id) }}" class="btn btn-sm btn-primary">Download</a>
+                <a href="{{ url_for('file_mgmt.file_download', file_id=f.id) }}" class="btn btn-sm btn-primary">DL</a>
                 <button type="button" class="btn-sm btn-success" onclick="toggleAssignForm({{ f.id }})">Assign</button>
             </td>
         </tr>
         <!-- Inline assign form (hidden by default) -->
-        <tr id="assign-row-{{ f.id }}" style="display:none; background:#eaf2f8;">
+        <tr id="assign-row-{{ f.id }}" class="assign-row" style="display:none;">
             <td colspan="7">
                 <form method="post" action="{{ url_for('file_mgmt.file_action') }}" class="form-inline" style="padding:8px 0;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -156,7 +209,7 @@
     </tbody>
 </table>
 {% else %}
-<p style="color: #7f8c8d;">No files matching filter.</p>
+<p class="text-muted">No files matching filter.</p>
 {% endif %}
 
 <!-- Counterparty datalist for autocomplete -->
@@ -192,20 +245,149 @@
                 <option value="{{ cp.id }}">#{{ cp.id }} - {{ cp.name }} ({{ cp.slug }})</option>
                 {% endfor %}
             </select>
-            <small style="color:#7f8c8d;">Hold Ctrl/Cmd to select multiple</small>
+            <small class="text-muted">Hold Ctrl/Cmd to select multiple</small>
         </div>
         <button type="submit" class="btn-danger">Merge</button>
     </form>
 </div>
 
 <style>
-    .complete { background: #d5f5e3 !important; }
+    /* Status colors */
+    .cp-complete { background: #fef9e7 !important; }
+    .cp-delivered { background: #f0f0f0 !important; }
     .status-missing { color: #e74c3c; font-weight: bold; }
     .status-received { color: #27ae60; }
     .status-verified { color: #2980b9; }
+    .text-muted { color: #7f8c8d; }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 12px; font-weight: bold; }
+    .badge-ok { background: #d5f5e3; color: #1e8449; }
+    .badge-warn { background: #fdebd0; color: #b7770a; }
+    .badge-err { background: #fadbd8; color: #922b21; }
+    .badge-info { background: #d6eaf8; color: #1a5276; }
+    .badge-progress { background: #eaecee; color: #566573; }
+
+    /* Filter bar */
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+    .filter-bar input[type="text"] { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; min-width: 200px; }
+    .filter-bar select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+    .toggle-label { font-size: 13px; color: #555; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+
+    /* Sortable columns */
+    .sortable { cursor: pointer; user-select: none; }
+    .sortable:hover { background: #1a5276; }
+    .sort-icon { font-size: 10px; }
+
+    /* Assign row */
+    .assign-row { background: #eaf2f8 !important; }
 </style>
 
 <script>
+/* ===== Counterparty Progress Table ===== */
+function filterCpTable() {
+    var search = document.getElementById('cp-search').value.toLowerCase();
+    var statusFilter = document.getElementById('cp-status-filter').value;
+    var showDelivered = document.getElementById('cp-show-delivered').checked;
+
+    var rows = document.querySelectorAll('#cp-table .cp-row');
+    rows.forEach(function(row) {
+        var name = row.getAttribute('data-name');
+        var status = row.getAttribute('data-status');
+        var matchSearch = !search || name.indexOf(search) !== -1;
+        var matchStatus = statusFilter === 'all' || status === statusFilter;
+
+        // Hide delivered unless checkbox is checked or filter specifically selects delivered
+        if (status === 'delivered' && !showDelivered && statusFilter !== 'delivered') {
+            row.style.display = 'none';
+            return;
+        }
+
+        row.style.display = (matchSearch && matchStatus) ? '' : 'none';
+    });
+}
+
+var cpSortDir = {};
+function sortCpTable(colIdx) {
+    cpSortDir[colIdx] = !cpSortDir[colIdx];
+    var table = document.getElementById('cp-table');
+    var tbody = table.querySelector('tbody');
+    var rows = Array.from(tbody.querySelectorAll('tr.cp-row'));
+
+    rows.sort(function(a, b) {
+        var aText = a.cells[colIdx].textContent.trim().toLowerCase();
+        var bText = b.cells[colIdx].textContent.trim().toLowerCase();
+        // Try numeric sort for progress column
+        var aNum = parseFloat(aText);
+        var bNum = parseFloat(bText);
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+            return cpSortDir[colIdx] ? aNum - bNum : bNum - aNum;
+        }
+        return cpSortDir[colIdx] ? aText.localeCompare(bText) : bText.localeCompare(aText);
+    });
+
+    rows.forEach(function(row) { tbody.appendChild(row); });
+}
+
+/* ===== Files Table ===== */
+function filterFileTable() {
+    var search = document.getElementById('file-search').value.toLowerCase();
+    var statusFilter = document.getElementById('file-status-filter').value;
+    var companyFilter = document.getElementById('file-company-filter').value;
+    var visibleCount = 0;
+
+    var rows = document.querySelectorAll('#file-table .file-row');
+    rows.forEach(function(row) {
+        var filename = row.getAttribute('data-filename');
+        var status = row.getAttribute('data-status');
+        var company = row.getAttribute('data-company');
+
+        var matchSearch = !search || filename.indexOf(search) !== -1 || company.indexOf(search) !== -1;
+        var matchStatus = statusFilter === 'all' || status === statusFilter;
+        var matchCompany = companyFilter === 'all' || company === companyFilter;
+        var visible = matchSearch && matchStatus && matchCompany;
+
+        row.style.display = visible ? '' : 'none';
+        // Also hide assign row if file row is hidden
+        var assignRow = document.getElementById('assign-row-' + row.cells[0].textContent.trim());
+        if (assignRow && !visible) assignRow.style.display = 'none';
+
+        if (visible) visibleCount++;
+    });
+
+    document.getElementById('files-visible-count').textContent = visibleCount;
+}
+
+var fileSortDir = {};
+function sortFileTable(colIdx) {
+    fileSortDir[colIdx] = !fileSortDir[colIdx];
+    var table = document.getElementById('file-table');
+    var tbody = table.querySelector('tbody');
+    var rows = Array.from(tbody.querySelectorAll('tr.file-row'));
+    // Collect each file row together with its assign row
+    var pairs = rows.map(function(row) {
+        var assignRow = document.getElementById('assign-row-' + row.cells[0].textContent.trim());
+        return { fileRow: row, assignRow: assignRow };
+    });
+
+    pairs.sort(function(a, b) {
+        var aText = a.fileRow.cells[colIdx].textContent.trim().toLowerCase();
+        var bText = b.fileRow.cells[colIdx].textContent.trim().toLowerCase();
+        var aNum = parseFloat(aText);
+        var bNum = parseFloat(bText);
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+            return fileSortDir[colIdx] ? aNum - bNum : bNum - aNum;
+        }
+        return fileSortDir[colIdx] ? aText.localeCompare(bText) : bText.localeCompare(aText);
+    });
+
+    pairs.forEach(function(pair) {
+        tbody.appendChild(pair.fileRow);
+        if (pair.assignRow) tbody.appendChild(pair.assignRow);
+    });
+}
+
+/* ===== Shared ===== */
 function toggleAssignForm(fileId) {
     var row = document.getElementById('assign-row-' + fileId);
     row.style.display = row.style.display === 'none' ? '' : 'none';
@@ -215,11 +397,17 @@ function fillMergeSource(cpId, cpName) {
     var sel = document.getElementById('merge-source');
     for (var i = 0; i < sel.options.length; i++) {
         if (sel.options[i].value == cpId) {
-            sel.selectedIndex = i;
+            sel.options[i].selected = true;
             break;
         }
     }
     window.scrollTo(0, document.body.scrollHeight);
 }
+
+// Apply default filter on page load (hide delivered by default)
+document.addEventListener('DOMContentLoaded', function() {
+    filterCpTable();
+    filterFileTable();
+});
 </script>
 {% endblock %}
