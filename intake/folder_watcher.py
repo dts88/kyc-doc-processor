@@ -23,22 +23,41 @@ class InboxHandler(FileSystemEventHandler):
     """Handle new files appearing in the inbox directory."""
 
     def __init__(self, db: DatabaseManager, processing_dir: Path,
-                 callback=None, supported_extensions=None):
+                 callback=None, supported_extensions=None, inbox_dir: Path | None = None,
+                 max_depth: int = 3):
+        super().__init__()
         self.db = db
         self.processing_dir = processing_dir
-        self.callback = callback  # called with file_id after registration
+        self.callback = callback
         self.supported_extensions = supported_extensions or DEFAULT_SUPPORTED_EXTENSIONS
         self._pending = set()
+        self._inbox_dir = inbox_dir
+        self._max_depth = max_depth
+
+    def _within_depth(self, file_path: Path) -> bool:
+        """Check if file is within the allowed subfolder depth."""
+        if self._inbox_dir is None:
+            return True
+        try:
+            rel = file_path.relative_to(self._inbox_dir)
+            # rel.parts count: file in inbox = 1, one subfolder = 2, etc.
+            return len(rel.parts) <= self._max_depth + 1
+        except ValueError:
+            return False
 
     def on_created(self, event):
         if event.is_directory:
             return
-        self._handle_file(Path(event.src_path))
+        file_path = Path(event.src_path)
+        if self._within_depth(file_path):
+            self._handle_file(file_path)
 
     def on_moved(self, event):
         if event.is_directory:
             return
-        self._handle_file(Path(event.dest_path))
+        file_path = Path(event.dest_path)
+        if self._within_depth(file_path):
+            self._handle_file(file_path)
 
     def _handle_file(self, file_path: Path):
         # Skip Windows Zone.Identifier metadata files (created when copying from Windows to WSL)
@@ -92,20 +111,23 @@ def start_watching(
     processing_dir: Path,
     callback=None,
     supported_extensions=None,
+    max_depth: int = 3,
 ) -> Observer:
     """Start watching the inbox directory for new files.
 
+    Monitors inbox and up to max_depth levels of subdirectories.
     Returns the Observer instance (call .stop() to stop).
     """
     inbox_dir.mkdir(parents=True, exist_ok=True)
 
     handler = InboxHandler(db, processing_dir, callback=callback,
-                           supported_extensions=supported_extensions)
+                           supported_extensions=supported_extensions,
+                           inbox_dir=inbox_dir, max_depth=max_depth)
     observer = Observer()
-    observer.schedule(handler, str(inbox_dir), recursive=False)
+    observer.schedule(handler, str(inbox_dir), recursive=True)
     observer.start()
 
-    logger.info("Watching inbox: %s", inbox_dir)
+    logger.info("Watching inbox (recursive, max_depth=%d): %s", max_depth, inbox_dir)
     return observer
 
 
@@ -114,18 +136,28 @@ def scan_existing_files(
     db: DatabaseManager,
     processing_dir: Path,
     supported_extensions=None,
+    max_depth: int = 3,
 ) -> list[int]:
-    """Scan inbox for any existing files and register them.
+    """Scan inbox and subdirectories (up to max_depth levels) for existing files.
 
     Returns list of newly registered file IDs.
     """
     supported = supported_extensions or DEFAULT_SUPPORTED_EXTENSIONS
     file_ids = []
 
-    for file_path in sorted(inbox_dir.iterdir()):
+    for file_path in sorted(inbox_dir.rglob("*")):
+        if not file_path.is_file():
+            continue
+        # Check depth: relative parts count (filename = 1 part, one subfolder = 2, etc.)
+        try:
+            rel = file_path.relative_to(inbox_dir)
+            if len(rel.parts) > max_depth + 1:
+                continue
+        except ValueError:
+            continue
         if "Zone.Identifier" in file_path.name:
             continue
-        if file_path.is_file() and file_path.suffix.lower() in supported:
+        if file_path.suffix.lower() in supported:
             file_id = register_file(db, file_path, processing_dir)
             if file_id:
                 file_ids.append(file_id)
