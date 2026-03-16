@@ -5,6 +5,7 @@
 
 <div class="form-section">
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="action" value="save">
         <div class="form-row">
             <label>SMTP Host</label>
@@ -33,10 +34,12 @@
 <h2>Actions</h2>
 <div class="form-section" style="display: flex; gap: 10px;">
     <form method="post" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="action" value="test">
         <button type="submit" class="btn-success">Send Test Email</button>
     </form>
     <form method="post" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="action" value="import_yaml">
         <button type="submit" class="btn-secondary">Import from config.yaml</button>
     </form>

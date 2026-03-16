@@ -44,10 +44,11 @@ def register_file(
         file_path.unlink(missing_ok=True)
         return None
 
-    # Detect MIME type
+    # Detect MIME type and size before moving
     mime_type = _detect_mime_type(file_path)
+    file_size = file_path.stat().st_size
 
-    # Move to processing directory
+    # Determine destination path
     processing_dir.mkdir(parents=True, exist_ok=True)
     dest = processing_dir / file_path.name
     # Handle name collisions
@@ -59,16 +60,25 @@ def register_file(
             dest = processing_dir / f"{stem}_{counter}{suffix}"
             counter += 1
 
-    shutil.move(str(file_path), str(dest))
-    logger.info("Moved %s to processing: %s", file_path.name, dest)
-
-    # Insert into database
+    # Insert into database FIRST (before moving file)
+    # Use the planned destination path so DB record matches final location
     file_id = db.execute_insert(
         """INSERT INTO submitted_files
            (original_filename, file_path, file_size, file_hash, mime_type, status)
            VALUES (?, ?, ?, ?, ?, 'pending')""",
-        (file_path.name, str(dest), dest.stat().st_size, file_hash, mime_type),
+        (file_path.name, str(dest), file_size, file_hash, mime_type),
     )
+
+    # Now move the file — if this fails, DB record exists but file stays in inbox
+    # (recoverable: file can be re-scanned on next run)
+    try:
+        shutil.move(str(file_path), str(dest))
+    except Exception as e:
+        # Roll back DB record since file wasn't moved
+        db.execute("DELETE FROM submitted_files WHERE id = ?", (file_id,))
+        raise RuntimeError(f"Failed to move file to processing: {e}") from e
+
+    logger.info("Moved %s to processing: %s", file_path.name, dest)
 
     # Log intake
     db.execute_insert(

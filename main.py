@@ -5,6 +5,7 @@ import logging
 import shutil
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import click
@@ -150,15 +151,44 @@ def process():
         client = None
         click.echo("  Using Claude Code CLI backend (no Anthropic API key)")
 
-    for file_id in all_pending_ids:
+    max_workers = config.get("processing", {}).get("max_workers", 1)
+
+    def _process_one(fid):
+        """Process a single file, catching errors."""
+        # Each thread gets its own DB connection
+        thread_db = get_db(config)
+        load_config(thread_db)  # load VP names for validation
         try:
-            _process_single_file(config, db, client, file_id)
+            _process_single_file(config, thread_db, client, fid)
         except Exception:
-            logger.exception("Error processing file #%d", file_id)
-            db.execute(
+            logger.exception("Error processing file #%d", fid)
+            thread_db.execute(
                 "UPDATE submitted_files SET status = 'error', error_message = ? WHERE id = ?",
-                (f"Pipeline error: see logs", file_id),
+                ("Pipeline error: see logs", fid),
             )
+        finally:
+            thread_db.close()
+
+    if max_workers > 1 and len(all_pending_ids) > 1:
+        click.echo(f"  Processing with {max_workers} worker threads")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_process_one, fid): fid for fid in all_pending_ids}
+            for future in as_completed(futures):
+                fid = futures[future]
+                try:
+                    future.result()
+                except Exception:
+                    logger.exception("Unexpected error in thread for file #%d", fid)
+    else:
+        for file_id in all_pending_ids:
+            try:
+                _process_single_file(config, db, client, file_id)
+            except Exception:
+                logger.exception("Error processing file #%d", file_id)
+                db.execute(
+                    "UPDATE submitted_files SET status = 'error', error_message = ? WHERE id = ?",
+                    ("Pipeline error: see logs", file_id),
+                )
 
     # 5. COMPLETION CHECK
     _check_and_package(config, db)
@@ -380,52 +410,57 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
         (str(primary_dest), file_id),
     )
 
-    # 4. EXTRACTION — run for primary doc_type only
-    click.echo(f"  [4] Extracting structured data (primary type: {primary_type})...")
+    # 4. EXTRACTION — run for ALL applicable doc_types
+    from classification.prompts import EXTRACTION_PROMPTS
     max_ext_images = config.get("classification", {}).get("max_extraction_images", 10)
+    extractable_types = [t for t in classification.doc_types if t in EXTRACTION_PROMPTS]
+    click.echo(f"  [4] Extracting structured data for {len(extractable_types)} type(s): {extractable_types}")
 
-    if client is not None:
-        from extraction.extractor import extract_document_data
-        extraction = extract_document_data(
-            client,
-            doc_type=primary_type,
-            text_content=result.text_content,
-            image_paths=result.image_paths if result.image_paths else None,
-            model_simple=config["claude"]["extraction_model_simple"],
-            model_complex=config["claude"]["extraction_model_complex"],
-            max_retries=max_retries,
-            retry_base_delay=retry_delay,
-            max_images=max_ext_images,
+    for ext_type in extractable_types:
+        click.echo(f"  [4] Extracting: {ext_type}...")
+        if client is not None:
+            from extraction.extractor import extract_document_data
+            extraction = extract_document_data(
+                client,
+                doc_type=ext_type,
+                text_content=result.text_content,
+                image_paths=result.image_paths if result.image_paths else None,
+                model_simple=config["claude"]["extraction_model_simple"],
+                model_complex=config["claude"]["extraction_model_complex"],
+                max_retries=max_retries,
+                retry_base_delay=retry_delay,
+                max_images=max_ext_images,
+            )
+        else:
+            from extraction.claude_code_extractor import extract_with_claude_code
+            extraction = extract_with_claude_code(
+                doc_type=ext_type,
+                text_content=result.text_content,
+                image_paths=result.image_paths if result.image_paths else None,
+                model="sonnet",
+            )
+
+        if extraction.validation_errors:
+            click.echo(f"    Validation warnings ({ext_type}): {extraction.validation_errors}")
+
+        # Save extraction (linked to its classification)
+        cls_id = classification_ids.get(ext_type)
+        db.execute_insert(
+            """INSERT OR REPLACE INTO extraction_results
+               (file_id, classification_id, extracted_data, validation_passed,
+                validation_errors, model_used, input_tokens, output_tokens, raw_response)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                file_id, cls_id,
+                json.dumps(extraction.extracted_data, ensure_ascii=False),
+                1 if extraction.validated else 0,
+                json.dumps(extraction.validation_errors),
+                extraction.model_used,
+                extraction.input_tokens, extraction.output_tokens,
+                extraction.raw_response,
+            ),
         )
-    else:
-        from extraction.claude_code_extractor import extract_with_claude_code
-        extraction = extract_with_claude_code(
-            doc_type=primary_type,
-            text_content=result.text_content,
-            image_paths=result.image_paths if result.image_paths else None,
-            model="sonnet",
-        )
-
-    if extraction.validation_errors:
-        click.echo(f"  Validation warnings: {extraction.validation_errors}")
-
-    # Save extraction (linked to primary classification)
-    primary_cls_id = classification_ids.get(primary_type)
-    db.execute_insert(
-        """INSERT OR REPLACE INTO extraction_results
-           (file_id, classification_id, extracted_data, validation_passed,
-            validation_errors, model_used, input_tokens, output_tokens, raw_response)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            file_id, primary_cls_id,
-            json.dumps(extraction.extracted_data, ensure_ascii=False),
-            1 if extraction.validated else 0,
-            json.dumps(extraction.validation_errors),
-            extraction.model_used,
-            extraction.input_tokens, extraction.output_tokens,
-            extraction.raw_response,
-        ),
-    )
+        click.echo(f"    {ext_type}: validated={extraction.validated}")
 
     db.execute(
         "UPDATE submitted_files SET status = 'extraction_done', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -444,7 +479,7 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
     # If counterparty was already packaged, reset to trigger re-packaging
     _reset_if_completed(db, counterparty_id)
 
-    click.echo(f"  Done. Types: [{types_str}] | Extraction validated: {extraction.validated}")
+    click.echo(f"  Done. Types: [{types_str}] | Extracted: {len(extractable_types)} type(s)")
 
 
 def _reset_if_completed(db, counterparty_id: int):

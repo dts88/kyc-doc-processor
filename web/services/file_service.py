@@ -112,13 +112,15 @@ def assign_file_classification(
             record_correction(db, file_info["original_filename"], machine_type, code,
                               file_path=file_info["file_path"])
 
-    # Clear previous classifications and extraction results
+    # Save new classifications FIRST (keep old records until extraction succeeds)
+    # Delete old extraction results since they belong to old classifications
     db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))
+    # Now safe to replace classifications
     db.execute("DELETE FROM document_classifications WHERE file_id = ?", (file_id,))
 
-    # Save classification for each doc type
     current_path = Path(file_info["file_path"])
     primary_cls_id = None
+    classification_ids = {}  # code -> cls_id
     for i, code in enumerate(doc_type_codes):
         doc_type_id = CODE_TO_ID[code]
         is_primary = 1 if i == 0 else 0
@@ -134,6 +136,7 @@ def assign_file_classification(
         )
         if i == 0:
             primary_cls_id = cls_id
+        classification_ids[code] = cls_id
 
         update_checklist(db, counterparty_id, doc_type_id, file_id)
 
@@ -148,9 +151,24 @@ def assign_file_classification(
         (str(current_path), file_id),
     )
 
-    # Run extraction on primary doc type
-    primary_type = doc_type_codes[0]
-    extraction_result = _run_extraction(db, file_id, primary_cls_id, primary_type, current_path)
+    # Run extraction for ALL doc types (not just primary)
+    extraction_results = {}
+    for code in doc_type_codes:
+        cls_id = classification_ids[code]
+        ext_status = _run_extraction(db, file_id, cls_id, code, current_path)
+        extraction_results[code] = ext_status
+    extraction_result = extraction_results.get(doc_type_codes[0], "skipped")
+
+    # Audit log: manual classification via web
+    db.execute_insert(
+        """INSERT INTO processing_log (file_id, counterparty_id, stage, action, details)
+           VALUES (?, ?, 'classification', 'manual_assign_web', ?)""",
+        (file_id, counterparty_id, json.dumps({
+            "doc_types": doc_type_codes,
+            "counterparty_name": counterparty_name,
+            "extraction_results": extraction_results,
+        })),
+    )
 
     # If counterparty was already packaged, reset to trigger re-packaging
     _reset_if_completed(db, counterparty_id)
@@ -500,6 +518,18 @@ def merge_counterparties(db: DatabaseManager, target_id: int, source_id: int) ->
 
     # Delete source counterparty
     db.execute("DELETE FROM counterparties WHERE id = ?", (source_id,))
+
+    # Audit log: counterparty merge via web
+    db.execute_insert(
+        """INSERT INTO processing_log (counterparty_id, stage, action, details)
+           VALUES (?, 'tracking', 'merge_counterparties_web', ?)""",
+        (target_id, json.dumps({
+            "source_id": source_id,
+            "source_name": source["name"],
+            "target_id": target_id,
+            "target_name": target["name"],
+        })),
+    )
 
     logger.info(
         "Merged counterparty #%d (%s) into #%d (%s)",

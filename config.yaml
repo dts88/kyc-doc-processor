@@ -28,6 +28,7 @@ processing:
   scan_dpi: 300
   max_image_dimension: 4096
   jpeg_quality: 85
+  max_workers: 3  # concurrent file processing threads (1 = sequential)
   supported_extensions:
     - .pdf
     - .docx

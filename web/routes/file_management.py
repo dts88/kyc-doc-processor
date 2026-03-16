@@ -8,7 +8,7 @@ from flask import (
 )
 
 from classification.doc_types import DOC_TYPES
-from web import get_db_from_app
+from web import get_db_from_app, is_safe_path
 from web.services.file_service import (
     assign_file_classification,
     get_all_counterparties,
@@ -138,6 +138,8 @@ def file_download(file_id):
             abort(404)
 
         file_path = Path(detail["file_path"])
+        if not is_safe_path(current_app, file_path):
+            abort(403)
         if not file_path.exists():
             flash(f"File not found on disk: {file_path}", "error")
             return redirect(url_for("file_mgmt.file_list"))
@@ -161,6 +163,8 @@ def file_view(file_id):
             abort(404)
 
         file_path = Path(detail["file_path"])
+        if not is_safe_path(current_app, file_path):
+            abort(403)
         if not file_path.exists():
             flash(f"File not found on disk: {file_path}", "error")
             return redirect(url_for("file_mgmt.file_list"))

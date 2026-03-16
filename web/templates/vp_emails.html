@@ -11,6 +11,7 @@
 <h2>Add VP Email</h2>
 <div class="form-section">
     <form method="post" class="form-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="action" value="add">
         <div class="form-row">
             <label>VP Name</label>
@@ -43,6 +44,7 @@
             <td>{{ vp.added_at }}</td>
             <td>
                 <form method="post" style="display:inline;" onsubmit="return confirm('Remove this VP email?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="vp_id" value="{{ vp.id }}">
                     <button type="submit" class="btn-danger btn-sm">Delete</button>

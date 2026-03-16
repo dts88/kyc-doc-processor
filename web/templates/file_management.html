@@ -131,6 +131,7 @@
         <tr id="assign-row-{{ f.id }}" style="display:none; background:#eaf2f8;">
             <td colspan="7">
                 <form method="post" action="{{ url_for('file_mgmt.file_action') }}" class="form-inline" style="padding:8px 0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="action" value="assign">
                     <input type="hidden" name="file_id" value="{{ f.id }}">
                     <div class="form-row">
@@ -173,6 +174,7 @@
         from the <strong>source(s)</strong> will be moved to the <strong>target</strong>. The sources will be deleted.
     </div>
     <form method="post" action="{{ url_for('file_mgmt.file_action') }}" class="form-inline" onsubmit="return confirm('Are you sure? This will delete the selected source counterparties.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="action" value="merge">
         <div class="form-row">
             <label>Target (keep)</label>

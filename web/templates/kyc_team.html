@@ -12,6 +12,7 @@
 <h2>Add Team Member</h2>
 <div class="form-section">
     <form method="post" class="form-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="action" value="add">
         <div class="form-row">
             <label>Name</label>
@@ -53,6 +54,7 @@
             <td>{{ m.added_at }}</td>
             <td>
                 <form method="post" style="display:inline;" onsubmit="return confirm('Remove this team member?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="member_id" value="{{ m.id }}">
                     <button type="submit" class="btn-danger btn-sm">Delete</button>

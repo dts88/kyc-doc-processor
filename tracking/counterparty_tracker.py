@@ -3,12 +3,78 @@
 import json
 import logging
 import re
+import unicodedata
 
 from rapidfuzz import fuzz
 
 from database.connection import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+# Full-width to half-width punctuation mapping for CJK normalization
+_FULLWIDTH_MAP = str.maketrans({
+    "（": "(", "）": ")", "【": "[", "】": "]", "｛": "{", "｝": "}",
+    "，": ",", "。": ".", "；": ";", "：": ":", "\u201c": '"', "\u201d": '"',
+    "\u2018": "'", "\u2019": "'", "！": "!", "？": "?", "、": "/",
+})
+
+
+def _normalize_cjk(text: str) -> str:
+    """Normalize CJK text for better fuzzy matching.
+
+    - Full-width punctuation → half-width
+    - NFKC unicode normalization (e.g. ﬁ → fi, ２ → 2)
+    - Collapse whitespace
+    """
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_FULLWIDTH_MAP)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _split_cjk_latin(text: str) -> tuple[str, str]:
+    """Split text into CJK portion and Latin/ASCII portion.
+
+    Returns (cjk_part, latin_part). Either may be empty.
+    """
+    cjk_chars = []
+    latin_chars = []
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff' or '\u3400' <= ch <= '\u4dbf' or '\uf900' <= ch <= '\ufaff':
+            cjk_chars.append(ch)
+        elif ch.isascii() or ch in " -_.":
+            latin_chars.append(ch)
+        else:
+            # Other scripts (keep in both for safety)
+            cjk_chars.append(ch)
+            latin_chars.append(ch)
+    return "".join(cjk_chars).strip(), "".join(latin_chars).strip()
+
+
+def _fuzzy_score(name_a: str, name_b: str) -> float:
+    """Compute fuzzy match score with CJK awareness.
+
+    For mixed CJK/Latin names, computes scores on each portion separately
+    and returns the higher score.
+    """
+    a_norm = _normalize_cjk(name_a.lower())
+    b_norm = _normalize_cjk(name_b.lower())
+
+    # Standard token_sort_ratio on full normalized text
+    full_score = fuzz.token_sort_ratio(a_norm, b_norm)
+
+    # If both contain CJK characters, also try matching CJK portions separately
+    a_cjk, a_latin = _split_cjk_latin(a_norm)
+    b_cjk, b_latin = _split_cjk_latin(b_norm)
+
+    partial_scores = [full_score]
+
+    if a_cjk and b_cjk:
+        partial_scores.append(fuzz.token_sort_ratio(a_cjk, b_cjk))
+    if a_latin and b_latin and len(a_latin) >= 3 and len(b_latin) >= 3:
+        partial_scores.append(fuzz.token_sort_ratio(a_latin, b_latin))
+
+    return max(partial_scores)
 
 
 def slugify(name: str) -> str:
@@ -48,8 +114,8 @@ def find_or_create_counterparty(
     best_score = 0
 
     for cp in all_counterparties:
-        # Check main name
-        score = fuzz.token_sort_ratio(company_name.lower(), cp["name"].lower())
+        # Check main name (CJK-aware fuzzy matching)
+        score = _fuzzy_score(company_name, cp["name"])
         if score > best_score:
             best_score = score
             best_match_id = cp["id"]
@@ -57,7 +123,7 @@ def find_or_create_counterparty(
         # Check aliases
         aliases = json.loads(cp["aliases"]) if cp["aliases"] else []
         for alias in aliases:
-            alias_score = fuzz.token_sort_ratio(company_name.lower(), alias.lower())
+            alias_score = _fuzzy_score(company_name, alias)
             if alias_score > best_score:
                 best_score = alias_score
                 best_match_id = cp["id"]
@@ -100,9 +166,9 @@ def _add_alias(db: DatabaseManager, counterparty_id: int, name: str):
     if not rows:
         return
     aliases = json.loads(rows[0]["aliases"]) if rows[0]["aliases"] else []
-    # Check if already similar to an existing alias
+    # Check if already similar to an existing alias (CJK-aware)
     for alias in aliases:
-        if fuzz.token_sort_ratio(name.lower(), alias.lower()) >= 95:
+        if _fuzzy_score(name, alias) >= 95:
             return
     aliases.append(name)
     db.execute(
