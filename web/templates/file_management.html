@@ -44,9 +44,9 @@
 <table id="cp-table" class="filterable-table">
     <thead>
         <tr>
-            <th data-col="0" data-filterable>Counterparty <span class="col-filter-btn" onclick="toggleColFilter(event,'cp-table',0)">&#9660;</span></th>
-            <th data-col="1" data-filterable>Status <span class="col-filter-btn" onclick="toggleColFilter(event,'cp-table',1)">&#9660;</span></th>
-            <th data-col="2">Progress</th>
+            <th data-col="0"><span class="col-sort-text" onclick="sortColumn('cp-table',0)">Counterparty</span> <span class="col-filter-btn" onclick="event.stopPropagation();openColFilter('cp-table',0,this)">&#9660;</span></th>
+            <th data-col="1"><span class="col-sort-text" onclick="sortColumn('cp-table',1)">Status</span> <span class="col-filter-btn" onclick="event.stopPropagation();openColFilter('cp-table',1,this)">&#9660;</span></th>
+            <th data-col="2"><span class="col-sort-text" onclick="sortColumn('cp-table',2)">Progress</span></th>
             <th title="Company Registration (Bizfile)">BF</th>
             <th title="Incorporation Documents">IC</th>
             <th title="Memorandum and Articles of Association">MA</th>
@@ -109,12 +109,12 @@
 <table id="file-table" class="filterable-table">
     <thead>
         <tr>
-            <th data-col="0">ID</th>
-            <th data-col="1">Filename</th>
-            <th data-col="2" data-filterable>Status <span class="col-filter-btn" onclick="toggleColFilter(event,'file-table',2)">&#9660;</span></th>
-            <th data-col="3" data-filterable>Doc Type <span class="col-filter-btn" onclick="toggleColFilter(event,'file-table',3)">&#9660;</span></th>
-            <th data-col="4" data-filterable>Company <span class="col-filter-btn" onclick="toggleColFilter(event,'file-table',4)">&#9660;</span></th>
-            <th data-col="5">Confidence</th>
+            <th data-col="0"><span class="col-sort-text" onclick="sortColumn('file-table',0)">ID</span></th>
+            <th data-col="1"><span class="col-sort-text" onclick="sortColumn('file-table',1)">Filename</span></th>
+            <th data-col="2"><span class="col-sort-text" onclick="sortColumn('file-table',2)">Status</span> <span class="col-filter-btn" onclick="event.stopPropagation();openColFilter('file-table',2,this)">&#9660;</span></th>
+            <th data-col="3"><span class="col-sort-text" onclick="sortColumn('file-table',3)">Doc Type</span> <span class="col-filter-btn" onclick="event.stopPropagation();openColFilter('file-table',3,this)">&#9660;</span></th>
+            <th data-col="4"><span class="col-sort-text" onclick="sortColumn('file-table',4)">Company</span> <span class="col-filter-btn" onclick="event.stopPropagation();openColFilter('file-table',4,this)">&#9660;</span></th>
+            <th data-col="5"><span class="col-sort-text" onclick="sortColumn('file-table',5)">Confidence</span></th>
             <th>Action</th>
         </tr>
     </thead>
@@ -267,8 +267,9 @@
     .col-filter-dropdown .cfd-footer button { padding: 4px 14px; font-size: 12px; border-radius: 3px; cursor: pointer; border: none; }
 
     /* Sortable header */
-    th[data-col] { position: relative; cursor: pointer; user-select: none; }
-    th[data-col]:hover { background: #1a5276; }
+    th[data-col] { position: relative; user-select: none; white-space: nowrap; }
+    .col-sort-text { cursor: pointer; }
+    .col-sort-text:hover { text-decoration: underline; }
     .sort-arrow { font-size: 10px; margin-left: 2px; }
 </style>
 
@@ -276,8 +277,9 @@
 /* ==========================================================
    Excel-style Column Filter System
    ========================================================== */
-var _activeFilters = {};  // tableId -> { colIdx: Set of allowed values }
+var _activeFilters = {};  // "tableId:colIdx" -> Set of allowed values
 var _openDropdown = null;
+var _justOpenedFilter = false;  // guard against immediate close
 
 function _getFilterKey(tableId, colIdx) { return tableId + ':' + colIdx; }
 
@@ -285,19 +287,15 @@ function _getFilterKey(tableId, colIdx) { return tableId + ':' + colIdx; }
 function _getColumnValues(tableId, colIdx) {
     var table = document.getElementById(tableId);
     var rows = table.querySelectorAll('tbody tr.data-row');
-    var vals = new Map();  // normalized -> display
+    var vals = new Map();
     rows.forEach(function(row) {
         var cell = row.cells[colIdx];
         if (!cell) return;
-        var text = cell.textContent.trim();
-        // For display, get the clean text (strip extra whitespace / newlines)
-        var display = text.replace(/\s+/g, ' ');
+        var display = cell.textContent.trim().replace(/\s+/g, ' ');
         var norm = display.toLowerCase();
         if (!vals.has(norm)) vals.set(norm, display);
     });
-    // Sort alphabetically
-    var sorted = Array.from(vals.entries()).sort(function(a,b) { return a[0].localeCompare(b[0]); });
-    return sorted;  // [[norm, display], ...]
+    return Array.from(vals.entries()).sort(function(a,b) { return a[0].localeCompare(b[0]); });
 }
 
 /* Get currently allowed values for a column (null = all allowed) */
@@ -307,18 +305,17 @@ function _getAllowed(tableId, colIdx) {
 }
 
 /* Build and show dropdown */
-function toggleColFilter(event, tableId, colIdx) {
-    event.stopPropagation();
-    // Close any open dropdown
+function openColFilter(tableId, colIdx, btnEl) {
+    // Close any existing dropdown first
     _closeDropdown();
 
-    var btn = event.target;
     var values = _getColumnValues(tableId, colIdx);
     var allowed = _getAllowed(tableId, colIdx);
 
     var dd = document.createElement('div');
     dd.className = 'col-filter-dropdown';
-    dd.onclick = function(e) { e.stopPropagation(); };
+    dd.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+    dd.addEventListener('click', function(e) { e.stopPropagation(); });
 
     // Header with search
     var header = document.createElement('div');
@@ -360,10 +357,11 @@ function toggleColFilter(event, tableId, colIdx) {
         var cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = !allowed || allowed.has(norm);
-        cb.id = 'cfd-' + tableId + '-' + colIdx + '-' + norm.replace(/[^a-z0-9]/g,'_');
+        var uid = 'cfd-' + tableId + '-' + colIdx + '-' + norm.replace(/[^a-z0-9]/g,'_');
+        cb.id = uid;
         var lbl = document.createElement('label');
         lbl.textContent = display || '(empty)';
-        lbl.htmlFor = cb.id;
+        lbl.htmlFor = uid;
         item.appendChild(cb);
         item.appendChild(lbl);
         list.appendChild(item);
@@ -379,7 +377,7 @@ function toggleColFilter(event, tableId, colIdx) {
     clearBtn.onclick = function() {
         var key = _getFilterKey(tableId, colIdx);
         delete _activeFilters[key];
-        btn.classList.remove('active');
+        btnEl.classList.remove('active');
         _closeDropdown();
         _applyAllFilters(tableId);
     };
@@ -392,18 +390,16 @@ function toggleColFilter(event, tableId, colIdx) {
         dd.querySelectorAll('.cfd-item input').forEach(function(cb) {
             total++;
             if (cb.checked) {
-                var val = cb.closest('.cfd-item').getAttribute('data-val');
-                selected.add(val);
+                selected.add(cb.closest('.cfd-item').getAttribute('data-val'));
             }
         });
         var key = _getFilterKey(tableId, colIdx);
         if (selected.size === total) {
-            // All selected = no filter
             delete _activeFilters[key];
-            btn.classList.remove('active');
+            btnEl.classList.remove('active');
         } else {
             _activeFilters[key] = selected;
-            btn.classList.add('active');
+            btnEl.classList.add('active');
         }
         _closeDropdown();
         _applyAllFilters(tableId);
@@ -413,14 +409,15 @@ function toggleColFilter(event, tableId, colIdx) {
     dd.appendChild(footer);
 
     // Position dropdown below the header cell
-    var th = btn.closest('th');
-    var rect = th.getBoundingClientRect();
+    var rect = btnEl.getBoundingClientRect();
     dd.style.position = 'fixed';
     dd.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
-    dd.style.top = rect.bottom + 'px';
+    dd.style.top = (rect.bottom + 4) + 'px';
 
     document.body.appendChild(dd);
     _openDropdown = dd;
+    _justOpenedFilter = true;
+    setTimeout(function() { _justOpenedFilter = false; }, 100);
     searchInput.focus();
 }
 
@@ -439,7 +436,6 @@ function _applyAllFilters(tableId) {
 
     rows.forEach(function(row) {
         var visible = true;
-        // Check each active filter for this table
         for (var key in _activeFilters) {
             if (key.indexOf(tableId + ':') !== 0) continue;
             var colIdx = parseInt(key.split(':')[1]);
@@ -451,17 +447,14 @@ function _applyAllFilters(tableId) {
         }
         row.style.display = visible ? '' : 'none';
 
-        // For file-table, also hide assign row
         if (tableId === 'file-table') {
             var fileId = row.cells[0] ? row.cells[0].textContent.trim() : '';
             var assignRow = document.getElementById('assign-row-' + fileId);
             if (assignRow && !visible) assignRow.style.display = 'none';
         }
-
         if (visible) visibleCount++;
     });
 
-    // Update count display
     var total = rows.length;
     if (tableId === 'cp-table') {
         document.getElementById('cp-count').textContent = '(' + visibleCount + '/' + total + ')';
@@ -470,27 +463,19 @@ function _applyAllFilters(tableId) {
     }
 }
 
-/* Sort by clicking column header (not the filter icon) */
+/* Sort by clicking column header text (not the filter icon) */
 var _sortDirs = {};
-document.addEventListener('click', function(e) {
-    var th = e.target.closest('th[data-col]');
-    if (!th || e.target.classList.contains('col-filter-btn')) return;
-    // Close any open dropdown
+function sortColumn(tableId, colIdx) {
     _closeDropdown();
-
-    var table = th.closest('table');
-    if (!table) return;
-    var tableId = table.id;
-    var colIdx = parseInt(th.getAttribute('data-col'));
+    var table = document.getElementById(tableId);
     var key = tableId + ':' + colIdx;
     _sortDirs[key] = !_sortDirs[key];
     var asc = _sortDirs[key];
 
     var tbody = table.querySelector('tbody');
     var rows = Array.from(tbody.querySelectorAll('tr.data-row'));
-
-    // For file-table, pair with assign rows
     var isFileTable = (tableId === 'file-table');
+
     var items = rows.map(function(row) {
         var assignRow = isFileTable ? document.getElementById('assign-row-' + (row.cells[0]?row.cells[0].textContent.trim():'')) : null;
         return { row: row, assign: assignRow };
@@ -511,18 +496,21 @@ document.addEventListener('click', function(e) {
 
     // Update sort arrows
     table.querySelectorAll('.sort-arrow').forEach(function(el) { el.remove(); });
-    var arrow = document.createElement('span');
-    arrow.className = 'sort-arrow';
-    arrow.textContent = asc ? ' \u25B2' : ' \u25BC';
-    // Insert before filter btn if present
-    var filterBtn = th.querySelector('.col-filter-btn');
-    if (filterBtn) th.insertBefore(arrow, filterBtn);
-    else th.appendChild(arrow);
-});
+    var th = table.querySelector('th[data-col="' + colIdx + '"]');
+    if (th) {
+        var arrow = document.createElement('span');
+        arrow.className = 'sort-arrow';
+        arrow.textContent = asc ? ' \u25B2' : ' \u25BC';
+        var filterBtn = th.querySelector('.col-filter-btn');
+        if (filterBtn) th.insertBefore(arrow, filterBtn);
+        else th.appendChild(arrow);
+    }
+}
 
-/* Close dropdown when clicking outside */
-document.addEventListener('click', function(e) {
-    if (_openDropdown && !_openDropdown.contains(e.target) && !e.target.classList.contains('col-filter-btn')) {
+/* Close dropdown on outside click */
+document.addEventListener('mousedown', function(e) {
+    if (_justOpenedFilter) return;
+    if (_openDropdown && !_openDropdown.contains(e.target) && !e.target.closest('.col-filter-btn')) {
         _closeDropdown();
     }
 });
@@ -541,7 +529,7 @@ function fillMergeSource(cpId, cpName) {
     window.scrollTo(0, document.body.scrollHeight);
 }
 
-/* On load: set initial counts, default CP filter to hide delivered */
+/* On load */
 document.addEventListener('DOMContentLoaded', function() {
     // Default: hide delivered in CP table
     var cpTable = document.getElementById('cp-table');
@@ -558,7 +546,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         _applyAllFilters('cp-table');
     }
-    // Init file table count
     var fileTable = document.getElementById('file-table');
     if (fileTable) {
         _applyAllFilters('file-table');
