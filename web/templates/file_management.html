@@ -38,26 +38,15 @@
 </div>
 
 <!-- B. Counterparty Progress Matrix -->
-<h2>Counterparty Progress</h2>
+<h2>Counterparty Progress <small class="text-muted" id="cp-count"></small></h2>
 {% if progress %}
-<div class="filter-bar">
-    <input type="text" id="cp-search" placeholder="Search counterparty..." oninput="filterCpTable()">
-    <select id="cp-status-filter" onchange="filterCpTable()">
-        <option value="all">All statuses</option>
-        <option value="in_progress" selected>In Progress</option>
-        <option value="completed">Completed (Pending Review)</option>
-        <option value="delivered">Delivered</option>
-    </select>
-    <label class="toggle-label"><input type="checkbox" id="cp-show-delivered" onchange="filterCpTable()"> Show delivered</label>
-</div>
-
 <div style="overflow-x: auto;">
-<table id="cp-table">
+<table id="cp-table" class="filterable-table">
     <thead>
         <tr>
-            <th class="sortable" onclick="sortCpTable(0)">Counterparty <span class="sort-icon"></span></th>
-            <th class="sortable" onclick="sortCpTable(1)">Status <span class="sort-icon"></span></th>
-            <th class="sortable" onclick="sortCpTable(2)">Progress <span class="sort-icon"></span></th>
+            <th data-col="0" data-filterable>Counterparty <span class="col-filter-btn" onclick="toggleColFilter(event,'cp-table',0)">&#9660;</span></th>
+            <th data-col="1" data-filterable>Status <span class="col-filter-btn" onclick="toggleColFilter(event,'cp-table',1)">&#9660;</span></th>
+            <th data-col="2">Progress</th>
             <th title="Company Registration (Bizfile)">BF</th>
             <th title="Incorporation Documents">IC</th>
             <th title="Memorandum and Articles of Association">MA</th>
@@ -75,9 +64,7 @@
     <tbody>
         {% for cp in progress %}
         {% if cp %}
-        <tr class="cp-row {{ 'cp-complete' if cp.status == 'completed' else '' }} {{ 'cp-delivered' if cp.status == 'delivered' else '' }}"
-            data-name="{{ cp.name | lower }}"
-            data-status="{{ cp.status }}">
+        <tr class="data-row {{ 'cp-complete' if cp.status == 'completed' else '' }} {{ 'cp-delivered' if cp.status == 'delivered' else '' }}">
             <td><strong>{{ cp.name }}</strong><br><small class="text-muted">#{{ cp.counterparty_id }}</small></td>
             <td>
                 {% if cp.status == 'completed' %}
@@ -116,50 +103,24 @@
 {% endif %}
 
 <!-- C. File List -->
-<h2>Files
-    {% if status_filter != 'all' %}<small style="font-weight:normal;" class="text-muted">({{ status_filter }})</small>{% endif %}
-    (<span id="files-visible-count">{{ files | length }}</span> / {{ files | length }})
-</h2>
+<h2>Files <small class="text-muted" id="file-count"></small></h2>
 
 {% if files %}
-<div class="filter-bar">
-    <input type="text" id="file-search" placeholder="Search filename or company..." oninput="filterFileTable()">
-    <select id="file-status-filter" onchange="filterFileTable()">
-        <option value="all" {{ 'selected' if status_filter == 'all' }}>All statuses</option>
-        <option value="pending" {{ 'selected' if status_filter == 'pending' }}>Pending</option>
-        <option value="needs_review" {{ 'selected' if status_filter == 'needs_review' }}>Needs Review</option>
-        <option value="error" {{ 'selected' if status_filter == 'error' }}>Error</option>
-        <option value="classified" {{ 'selected' if status_filter == 'classified' }}>Classified</option>
-        <option value="extraction_done" {{ 'selected' if status_filter == 'extraction_done' }}>Extracted</option>
-        <option value="packaged" {{ 'selected' if status_filter == 'packaged' }}>Packaged</option>
-    </select>
-    <select id="file-company-filter" onchange="filterFileTable()">
-        <option value="all">All companies</option>
-        {% for cp in counterparties %}
-        <option value="{{ cp.name | lower }}">{{ cp.name }}</option>
-        {% endfor %}
-    </select>
-</div>
-
-<table id="file-table">
+<table id="file-table" class="filterable-table">
     <thead>
         <tr>
-            <th class="sortable" onclick="sortFileTable(0)">ID <span class="sort-icon"></span></th>
-            <th class="sortable" onclick="sortFileTable(1)">Filename <span class="sort-icon"></span></th>
-            <th class="sortable" onclick="sortFileTable(2)">Status <span class="sort-icon"></span></th>
-            <th class="sortable" onclick="sortFileTable(3)">Doc Type <span class="sort-icon"></span></th>
-            <th class="sortable" onclick="sortFileTable(4)">Company <span class="sort-icon"></span></th>
-            <th class="sortable" onclick="sortFileTable(5)">Confidence <span class="sort-icon"></span></th>
+            <th data-col="0">ID</th>
+            <th data-col="1">Filename</th>
+            <th data-col="2" data-filterable>Status <span class="col-filter-btn" onclick="toggleColFilter(event,'file-table',2)">&#9660;</span></th>
+            <th data-col="3" data-filterable>Doc Type <span class="col-filter-btn" onclick="toggleColFilter(event,'file-table',3)">&#9660;</span></th>
+            <th data-col="4" data-filterable>Company <span class="col-filter-btn" onclick="toggleColFilter(event,'file-table',4)">&#9660;</span></th>
+            <th data-col="5">Confidence</th>
             <th>Action</th>
         </tr>
     </thead>
     <tbody>
         {% for f in files %}
-        <tr class="file-row"
-            data-filename="{{ f.original_filename | lower }}"
-            data-status="{{ f.status }}"
-            data-company="{{ (f.counterparty_name or '') | lower }}"
-            data-doctype="{{ f.doc_type_name or '' }}">
+        <tr class="data-row">
             <td>{{ f.id }}</td>
             <td title="{{ f.file_path }}" style="word-break:break-word; max-width:300px;">{{ f.original_filename }}</td>
             <td>
@@ -181,7 +142,6 @@
                 <button type="button" class="btn-sm btn-success" onclick="toggleAssignForm({{ f.id }})">Assign</button>
             </td>
         </tr>
-        <!-- Inline assign form (hidden by default) -->
         <tr id="assign-row-{{ f.id }}" class="assign-row" style="display:none;">
             <td colspan="7">
                 <form method="post" action="{{ url_for('file_mgmt.file_action') }}" class="form-inline" style="padding:8px 0;">
@@ -213,7 +173,6 @@
 <p class="text-muted">No files matching filter.</p>
 {% endif %}
 
-<!-- Counterparty datalist for autocomplete -->
 <datalist id="counterparty-list">
     {% for cp in counterparties %}
     <option value="{{ cp.name }}">{{ cp.slug }} (#{{ cp.id }})</option>
@@ -253,142 +212,322 @@
 </div>
 
 <style>
-    /* Status colors */
     .cp-complete { background: #fef9e7 !important; }
     .cp-delivered { background: #f0f0f0 !important; }
     .status-missing { color: #e74c3c; font-weight: bold; }
     .status-received { color: #27ae60; }
     .status-verified { color: #2980b9; }
     .text-muted { color: #7f8c8d; }
-
-    /* Badges */
-    .badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 12px; font-weight: bold; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 12px; font-weight: bold; white-space: nowrap; }
     .badge-ok { background: #d5f5e3; color: #1e8449; }
     .badge-warn { background: #fdebd0; color: #b7770a; }
     .badge-err { background: #fadbd8; color: #922b21; }
     .badge-info { background: #d6eaf8; color: #1a5276; }
     .badge-progress { background: #eaecee; color: #566573; }
-
-    /* Filter bar */
-    .filter-bar { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
-    .filter-bar input[type="text"] { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; min-width: 200px; }
-    .filter-bar select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
-    .toggle-label { font-size: 13px; color: #555; cursor: pointer; display: flex; align-items: center; gap: 4px; }
-
-    /* Sortable columns */
-    .sortable { cursor: pointer; user-select: none; }
-    .sortable:hover { background: #1a5276; }
-    .sort-icon { font-size: 10px; }
-
-    /* Assign row */
     .assign-row { background: #eaf2f8 !important; }
+
+    /* Column filter button */
+    .col-filter-btn {
+        cursor: pointer; font-size: 10px; margin-left: 3px; opacity: 0.7;
+        display: inline-block; vertical-align: middle;
+    }
+    .col-filter-btn:hover { opacity: 1; }
+    .col-filter-btn.active { opacity: 1; color: #f1c40f; }
+
+    /* Filter dropdown */
+    .col-filter-dropdown {
+        position: absolute; z-index: 1000; background: #fff; border: 1px solid #ccc;
+        border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 0;
+        min-width: 220px; max-width: 320px; font-size: 13px; color: #333;
+    }
+    .col-filter-dropdown .cfd-header {
+        padding: 8px 10px; border-bottom: 1px solid #eee; display: flex; gap: 6px; align-items: center;
+    }
+    .col-filter-dropdown .cfd-header input {
+        flex: 1; padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px; font-size: 12px;
+    }
+    .col-filter-dropdown .cfd-actions {
+        padding: 6px 10px; border-bottom: 1px solid #eee; display: flex; gap: 8px; font-size: 12px;
+    }
+    .col-filter-dropdown .cfd-actions a { cursor: pointer; color: #3498db; }
+    .col-filter-dropdown .cfd-actions a:hover { text-decoration: underline; }
+    .col-filter-dropdown .cfd-list {
+        max-height: 240px; overflow-y: auto; padding: 4px 0;
+    }
+    .col-filter-dropdown .cfd-item {
+        padding: 3px 10px; display: flex; align-items: center; gap: 6px; cursor: pointer;
+    }
+    .col-filter-dropdown .cfd-item:hover { background: #f0f4f8; }
+    .col-filter-dropdown .cfd-item input { margin: 0; cursor: pointer; }
+    .col-filter-dropdown .cfd-item label { cursor: pointer; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .col-filter-dropdown .cfd-item.hidden { display: none; }
+    .col-filter-dropdown .cfd-footer {
+        padding: 8px 10px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 6px;
+    }
+    .col-filter-dropdown .cfd-footer button { padding: 4px 14px; font-size: 12px; border-radius: 3px; cursor: pointer; border: none; }
+
+    /* Sortable header */
+    th[data-col] { position: relative; cursor: pointer; user-select: none; }
+    th[data-col]:hover { background: #1a5276; }
+    .sort-arrow { font-size: 10px; margin-left: 2px; }
 </style>
 
 <script>
-/* ===== Counterparty Progress Table ===== */
-function filterCpTable() {
-    var search = document.getElementById('cp-search').value.toLowerCase();
-    var statusFilter = document.getElementById('cp-status-filter').value;
-    var showDelivered = document.getElementById('cp-show-delivered').checked;
+/* ==========================================================
+   Excel-style Column Filter System
+   ========================================================== */
+var _activeFilters = {};  // tableId -> { colIdx: Set of allowed values }
+var _openDropdown = null;
 
-    var rows = document.querySelectorAll('#cp-table .cp-row');
+function _getFilterKey(tableId, colIdx) { return tableId + ':' + colIdx; }
+
+/* Collect unique values from a column */
+function _getColumnValues(tableId, colIdx) {
+    var table = document.getElementById(tableId);
+    var rows = table.querySelectorAll('tbody tr.data-row');
+    var vals = new Map();  // normalized -> display
     rows.forEach(function(row) {
-        var name = row.getAttribute('data-name');
-        var status = row.getAttribute('data-status');
-        var matchSearch = !search || name.indexOf(search) !== -1;
-        var matchStatus = statusFilter === 'all' || status === statusFilter;
-
-        // Hide delivered unless checkbox is checked or filter specifically selects delivered
-        if (status === 'delivered' && !showDelivered && statusFilter !== 'delivered') {
-            row.style.display = 'none';
-            return;
-        }
-
-        row.style.display = (matchSearch && matchStatus) ? '' : 'none';
+        var cell = row.cells[colIdx];
+        if (!cell) return;
+        var text = cell.textContent.trim();
+        // For display, get the clean text (strip extra whitespace / newlines)
+        var display = text.replace(/\s+/g, ' ');
+        var norm = display.toLowerCase();
+        if (!vals.has(norm)) vals.set(norm, display);
     });
+    // Sort alphabetically
+    var sorted = Array.from(vals.entries()).sort(function(a,b) { return a[0].localeCompare(b[0]); });
+    return sorted;  // [[norm, display], ...]
 }
 
-var cpSortDir = {};
-function sortCpTable(colIdx) {
-    cpSortDir[colIdx] = !cpSortDir[colIdx];
-    var table = document.getElementById('cp-table');
-    var tbody = table.querySelector('tbody');
-    var rows = Array.from(tbody.querySelectorAll('tr.cp-row'));
-
-    rows.sort(function(a, b) {
-        var aText = a.cells[colIdx].textContent.trim().toLowerCase();
-        var bText = b.cells[colIdx].textContent.trim().toLowerCase();
-        // Try numeric sort for progress column
-        var aNum = parseFloat(aText);
-        var bNum = parseFloat(bText);
-        if (!isNaN(aNum) && !isNaN(bNum)) {
-            return cpSortDir[colIdx] ? aNum - bNum : bNum - aNum;
-        }
-        return cpSortDir[colIdx] ? aText.localeCompare(bText) : bText.localeCompare(aText);
-    });
-
-    rows.forEach(function(row) { tbody.appendChild(row); });
+/* Get currently allowed values for a column (null = all allowed) */
+function _getAllowed(tableId, colIdx) {
+    var key = _getFilterKey(tableId, colIdx);
+    return _activeFilters[key] || null;
 }
 
-/* ===== Files Table ===== */
-function filterFileTable() {
-    var search = document.getElementById('file-search').value.toLowerCase();
-    var statusFilter = document.getElementById('file-status-filter').value;
-    var companyFilter = document.getElementById('file-company-filter').value;
+/* Build and show dropdown */
+function toggleColFilter(event, tableId, colIdx) {
+    event.stopPropagation();
+    // Close any open dropdown
+    _closeDropdown();
+
+    var btn = event.target;
+    var values = _getColumnValues(tableId, colIdx);
+    var allowed = _getAllowed(tableId, colIdx);
+
+    var dd = document.createElement('div');
+    dd.className = 'col-filter-dropdown';
+    dd.onclick = function(e) { e.stopPropagation(); };
+
+    // Header with search
+    var header = document.createElement('div');
+    header.className = 'cfd-header';
+    var searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search...';
+    searchInput.oninput = function() {
+        var q = this.value.toLowerCase();
+        dd.querySelectorAll('.cfd-item').forEach(function(item) {
+            var text = item.getAttribute('data-val');
+            item.classList.toggle('hidden', q && text.indexOf(q) === -1);
+        });
+    };
+    header.appendChild(searchInput);
+    dd.appendChild(header);
+
+    // Select All / Deselect All
+    var actions = document.createElement('div');
+    actions.className = 'cfd-actions';
+    var selAll = document.createElement('a');
+    selAll.textContent = 'Select All';
+    selAll.onclick = function() { dd.querySelectorAll('.cfd-item input').forEach(function(cb) { cb.checked = true; }); };
+    var deselAll = document.createElement('a');
+    deselAll.textContent = 'Deselect All';
+    deselAll.onclick = function() { dd.querySelectorAll('.cfd-item input').forEach(function(cb) { cb.checked = false; }); };
+    actions.appendChild(selAll);
+    actions.appendChild(deselAll);
+    dd.appendChild(actions);
+
+    // Checkbox list
+    var list = document.createElement('div');
+    list.className = 'cfd-list';
+    values.forEach(function(pair) {
+        var norm = pair[0], display = pair[1];
+        var item = document.createElement('div');
+        item.className = 'cfd-item';
+        item.setAttribute('data-val', norm);
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !allowed || allowed.has(norm);
+        cb.id = 'cfd-' + tableId + '-' + colIdx + '-' + norm.replace(/[^a-z0-9]/g,'_');
+        var lbl = document.createElement('label');
+        lbl.textContent = display || '(empty)';
+        lbl.htmlFor = cb.id;
+        item.appendChild(cb);
+        item.appendChild(lbl);
+        list.appendChild(item);
+    });
+    dd.appendChild(list);
+
+    // Footer: OK / Clear
+    var footer = document.createElement('div');
+    footer.className = 'cfd-footer';
+    var clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear Filter';
+    clearBtn.className = 'btn-secondary';
+    clearBtn.onclick = function() {
+        var key = _getFilterKey(tableId, colIdx);
+        delete _activeFilters[key];
+        btn.classList.remove('active');
+        _closeDropdown();
+        _applyAllFilters(tableId);
+    };
+    var okBtn = document.createElement('button');
+    okBtn.textContent = 'OK';
+    okBtn.className = 'btn-primary';
+    okBtn.onclick = function() {
+        var selected = new Set();
+        var total = 0;
+        dd.querySelectorAll('.cfd-item input').forEach(function(cb) {
+            total++;
+            if (cb.checked) {
+                var val = cb.closest('.cfd-item').getAttribute('data-val');
+                selected.add(val);
+            }
+        });
+        var key = _getFilterKey(tableId, colIdx);
+        if (selected.size === total) {
+            // All selected = no filter
+            delete _activeFilters[key];
+            btn.classList.remove('active');
+        } else {
+            _activeFilters[key] = selected;
+            btn.classList.add('active');
+        }
+        _closeDropdown();
+        _applyAllFilters(tableId);
+    };
+    footer.appendChild(clearBtn);
+    footer.appendChild(okBtn);
+    dd.appendChild(footer);
+
+    // Position dropdown below the header cell
+    var th = btn.closest('th');
+    var rect = th.getBoundingClientRect();
+    dd.style.position = 'fixed';
+    dd.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
+    dd.style.top = rect.bottom + 'px';
+
+    document.body.appendChild(dd);
+    _openDropdown = dd;
+    searchInput.focus();
+}
+
+function _closeDropdown() {
+    if (_openDropdown) {
+        _openDropdown.remove();
+        _openDropdown = null;
+    }
+}
+
+/* Apply all active filters to a table */
+function _applyAllFilters(tableId) {
+    var table = document.getElementById(tableId);
+    var rows = table.querySelectorAll('tbody tr.data-row');
     var visibleCount = 0;
 
-    var rows = document.querySelectorAll('#file-table .file-row');
     rows.forEach(function(row) {
-        var filename = row.getAttribute('data-filename');
-        var status = row.getAttribute('data-status');
-        var company = row.getAttribute('data-company');
-
-        var matchSearch = !search || filename.indexOf(search) !== -1 || company.indexOf(search) !== -1;
-        var matchStatus = statusFilter === 'all' || status === statusFilter;
-        var matchCompany = companyFilter === 'all' || company === companyFilter;
-        var visible = matchSearch && matchStatus && matchCompany;
-
+        var visible = true;
+        // Check each active filter for this table
+        for (var key in _activeFilters) {
+            if (key.indexOf(tableId + ':') !== 0) continue;
+            var colIdx = parseInt(key.split(':')[1]);
+            var allowed = _activeFilters[key];
+            var cell = row.cells[colIdx];
+            if (!cell) continue;
+            var val = cell.textContent.trim().replace(/\s+/g, ' ').toLowerCase();
+            if (!allowed.has(val)) { visible = false; break; }
+        }
         row.style.display = visible ? '' : 'none';
-        // Also hide assign row if file row is hidden
-        var assignRow = document.getElementById('assign-row-' + row.cells[0].textContent.trim());
-        if (assignRow && !visible) assignRow.style.display = 'none';
+
+        // For file-table, also hide assign row
+        if (tableId === 'file-table') {
+            var fileId = row.cells[0] ? row.cells[0].textContent.trim() : '';
+            var assignRow = document.getElementById('assign-row-' + fileId);
+            if (assignRow && !visible) assignRow.style.display = 'none';
+        }
 
         if (visible) visibleCount++;
     });
 
-    document.getElementById('files-visible-count').textContent = visibleCount;
+    // Update count display
+    var total = rows.length;
+    if (tableId === 'cp-table') {
+        document.getElementById('cp-count').textContent = '(' + visibleCount + '/' + total + ')';
+    } else if (tableId === 'file-table') {
+        document.getElementById('file-count').textContent = '(' + visibleCount + '/' + total + ')';
+    }
 }
 
-var fileSortDir = {};
-function sortFileTable(colIdx) {
-    fileSortDir[colIdx] = !fileSortDir[colIdx];
-    var table = document.getElementById('file-table');
+/* Sort by clicking column header (not the filter icon) */
+var _sortDirs = {};
+document.addEventListener('click', function(e) {
+    var th = e.target.closest('th[data-col]');
+    if (!th || e.target.classList.contains('col-filter-btn')) return;
+    // Close any open dropdown
+    _closeDropdown();
+
+    var table = th.closest('table');
+    if (!table) return;
+    var tableId = table.id;
+    var colIdx = parseInt(th.getAttribute('data-col'));
+    var key = tableId + ':' + colIdx;
+    _sortDirs[key] = !_sortDirs[key];
+    var asc = _sortDirs[key];
+
     var tbody = table.querySelector('tbody');
-    var rows = Array.from(tbody.querySelectorAll('tr.file-row'));
-    // Collect each file row together with its assign row
-    var pairs = rows.map(function(row) {
-        var assignRow = document.getElementById('assign-row-' + row.cells[0].textContent.trim());
-        return { fileRow: row, assignRow: assignRow };
+    var rows = Array.from(tbody.querySelectorAll('tr.data-row'));
+
+    // For file-table, pair with assign rows
+    var isFileTable = (tableId === 'file-table');
+    var items = rows.map(function(row) {
+        var assignRow = isFileTable ? document.getElementById('assign-row-' + (row.cells[0]?row.cells[0].textContent.trim():'')) : null;
+        return { row: row, assign: assignRow };
     });
 
-    pairs.sort(function(a, b) {
-        var aText = a.fileRow.cells[colIdx].textContent.trim().toLowerCase();
-        var bText = b.fileRow.cells[colIdx].textContent.trim().toLowerCase();
-        var aNum = parseFloat(aText);
-        var bNum = parseFloat(bText);
-        if (!isNaN(aNum) && !isNaN(bNum)) {
-            return fileSortDir[colIdx] ? aNum - bNum : bNum - aNum;
-        }
-        return fileSortDir[colIdx] ? aText.localeCompare(bText) : bText.localeCompare(aText);
+    items.sort(function(a, b) {
+        var aText = a.row.cells[colIdx] ? a.row.cells[colIdx].textContent.trim().toLowerCase() : '';
+        var bText = b.row.cells[colIdx] ? b.row.cells[colIdx].textContent.trim().toLowerCase() : '';
+        var aNum = parseFloat(aText), bNum = parseFloat(bText);
+        if (!isNaN(aNum) && !isNaN(bNum)) return asc ? aNum - bNum : bNum - aNum;
+        return asc ? aText.localeCompare(bText) : bText.localeCompare(aText);
     });
 
-    pairs.forEach(function(pair) {
-        tbody.appendChild(pair.fileRow);
-        if (pair.assignRow) tbody.appendChild(pair.assignRow);
+    items.forEach(function(item) {
+        tbody.appendChild(item.row);
+        if (item.assign) tbody.appendChild(item.assign);
     });
-}
 
-/* ===== Shared ===== */
+    // Update sort arrows
+    table.querySelectorAll('.sort-arrow').forEach(function(el) { el.remove(); });
+    var arrow = document.createElement('span');
+    arrow.className = 'sort-arrow';
+    arrow.textContent = asc ? ' \u25B2' : ' \u25BC';
+    // Insert before filter btn if present
+    var filterBtn = th.querySelector('.col-filter-btn');
+    if (filterBtn) th.insertBefore(arrow, filterBtn);
+    else th.appendChild(arrow);
+});
+
+/* Close dropdown when clicking outside */
+document.addEventListener('click', function(e) {
+    if (_openDropdown && !_openDropdown.contains(e.target) && !e.target.classList.contains('col-filter-btn')) {
+        _closeDropdown();
+    }
+});
+
+/* Shared helpers */
 function toggleAssignForm(fileId) {
     var row = document.getElementById('assign-row-' + fileId);
     row.style.display = row.style.display === 'none' ? '' : 'none';
@@ -397,18 +536,33 @@ function toggleAssignForm(fileId) {
 function fillMergeSource(cpId, cpName) {
     var sel = document.getElementById('merge-source');
     for (var i = 0; i < sel.options.length; i++) {
-        if (sel.options[i].value == cpId) {
-            sel.options[i].selected = true;
-            break;
-        }
+        if (sel.options[i].value == cpId) { sel.options[i].selected = true; break; }
     }
     window.scrollTo(0, document.body.scrollHeight);
 }
 
-// Apply default filter on page load (hide delivered by default)
+/* On load: set initial counts, default CP filter to hide delivered */
 document.addEventListener('DOMContentLoaded', function() {
-    filterCpTable();
-    filterFileTable();
+    // Default: hide delivered in CP table
+    var cpTable = document.getElementById('cp-table');
+    if (cpTable) {
+        var vals = _getColumnValues('cp-table', 1);
+        var nonDelivered = new Set();
+        vals.forEach(function(pair) {
+            if (pair[0].indexOf('delivered') === -1) nonDelivered.add(pair[0]);
+        });
+        if (nonDelivered.size < vals.length) {
+            _activeFilters[_getFilterKey('cp-table', 1)] = nonDelivered;
+            var statusBtn = cpTable.querySelector('th[data-col="1"] .col-filter-btn');
+            if (statusBtn) statusBtn.classList.add('active');
+        }
+        _applyAllFilters('cp-table');
+    }
+    // Init file table count
+    var fileTable = document.getElementById('file-table');
+    if (fileTable) {
+        _applyAllFilters('file-table');
+    }
 });
 </script>
 {% endblock %}
