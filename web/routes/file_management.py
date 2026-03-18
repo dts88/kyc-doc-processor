@@ -90,19 +90,12 @@ def file_action():
                 flash(result["error"], "error")
             else:
                 types_str = ", ".join(result["doc_types"])
-                msg = (
+                flash(
                     f"Assigned file #{result['file_id']} ({result['filename']}) "
                     f"as [{types_str}] to {result['counterparty_name']} (#{result['counterparty_id']})"
-                    f" | Extraction: {result.get('extraction', 'n/a')}"
+                    f" — extraction running in background",
+                    "success",
                 )
-                flash(msg, "success")
-
-                # Report any auto-packaged counterparties
-                for pkg in result.get("packaged") or []:
-                    flash(
-                        f"Packaged {pkg['name']} (#{pkg['counterparty_id']}) -> {pkg['zip_path']}",
-                        "success",
-                    )
 
         elif action == "delete":
             file_id = request.form.get("file_id", type=int)

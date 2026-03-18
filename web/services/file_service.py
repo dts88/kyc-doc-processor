@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 from pathlib import Path
 
 from classification.doc_types import CODE_TO_ID, DOC_TYPES
@@ -153,14 +154,6 @@ def assign_file_classification(
         (str(current_path), file_id),
     )
 
-    # Run extraction for ALL doc types (not just primary)
-    extraction_results = {}
-    for code in doc_type_codes:
-        cls_id = classification_ids[code]
-        ext_status = _run_extraction(db, file_id, cls_id, code, current_path)
-        extraction_results[code] = ext_status
-    extraction_result = extraction_results.get(doc_type_codes[0], "skipped")
-
     # Audit log: manual classification via web
     db.execute_insert(
         """INSERT INTO processing_log (file_id, counterparty_id, stage, action, details)
@@ -168,15 +161,18 @@ def assign_file_classification(
         (file_id, counterparty_id, json.dumps({
             "doc_types": doc_type_codes,
             "counterparty_name": counterparty_name,
-            "extraction_results": extraction_results,
         })),
     )
 
     # If counterparty was already packaged, reset to trigger re-packaging
     _reset_if_completed(db, counterparty_id)
 
-    # Check completion and auto-package
-    package_result = check_and_package(db)
+    # Launch extraction in background thread (non-blocking)
+    db_path = db.db_path
+    _run_extraction_background(
+        db_path, file_id, dict(classification_ids), list(doc_type_codes),
+        str(current_path), counterparty_id,
+    )
 
     return {
         "success": True,
@@ -185,8 +181,7 @@ def assign_file_classification(
         "doc_types": doc_type_codes,
         "counterparty_id": counterparty_id,
         "counterparty_name": counterparty_name,
-        "extraction": extraction_result,
-        "packaged": package_result,
+        "extraction": "background",
     }
 
 
@@ -202,6 +197,48 @@ def _clear_old_checklist_refs(db: DatabaseManager, file_id: int) -> None:
            WHERE file_id = ?""",
         (file_id,),
     )
+
+
+def _run_extraction_background(
+    db_path: str, file_id: int, classification_ids: dict,
+    doc_type_codes: list, file_path_str: str, counterparty_id: int,
+):
+    """Launch extraction for all doc types in a background thread.
+
+    Uses its own DatabaseManager so it doesn't block the web request.
+    Status is tracked via submitted_files.status:
+      classified -> extraction_done (or error on failure)
+    """
+    def _worker():
+        bg_db = DatabaseManager(str(db_path))
+        file_path = Path(file_path_str)
+        try:
+            extraction_results = {}
+            for code in doc_type_codes:
+                cls_id = classification_ids.get(code)
+                if cls_id:
+                    ext_status = _run_extraction(bg_db, file_id, cls_id, code, file_path)
+                    extraction_results[code] = ext_status
+
+            # Check completion and auto-package
+            check_and_package(bg_db)
+
+            logger.info(
+                "Background extraction done for file #%d: %s",
+                file_id, extraction_results,
+            )
+        except Exception:
+            logger.exception("Background extraction failed for file #%d", file_id)
+            bg_db.execute(
+                "UPDATE submitted_files SET status = 'error', error_message = ? WHERE id = ?",
+                ("Background extraction failed: see logs", file_id),
+            )
+        finally:
+            bg_db.close()
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    logger.info("Started background extraction thread for file #%d", file_id)
 
 
 def _run_extraction(
