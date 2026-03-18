@@ -163,8 +163,8 @@
             <td>{{ f.counterparty_name or '-' }}</td>
             <td>{% if f.confidence is not none %}{{ "%.0f" | format(f.confidence * 100) }}%{% else %}-{% endif %}</td>
             <td style="white-space:nowrap;" class="action-cell">
-                <a href="{{ url_for('file_mgmt.file_view', file_id=f.id) }}" class="btn btn-sm btn-secondary" target="_blank">View</a>
-                <a href="{{ url_for('file_mgmt.file_download', file_id=f.id) }}" class="btn btn-sm btn-primary">DL</a>
+                <a href="{{ url_for('file_mgmt.file_view', file_id=f.id) }}" class="btn btn-sm btn-secondary" target="_blank" onclick="event.stopPropagation();return viewFiles({{ f.id }},this.href)">View</a>
+                <a href="{{ url_for('file_mgmt.file_download', file_id=f.id) }}" class="btn btn-sm btn-primary" onclick="event.stopPropagation();return downloadFiles({{ f.id }})">DL</a>
                 <button type="button" class="btn-sm btn-success" onclick="event.stopPropagation();toggleAssignForm({{ f.id }})">Assign</button>
                 <form method="post" action="{{ url_for('file_mgmt.file_action') }}" style="display:inline;" onsubmit="return deleteFiles({{ f.id }})">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -640,6 +640,48 @@ function showBulkAssign() {
 
 function hideBulkAssign() {
     document.getElementById('bulk-assign-form').style.display = 'none';
+}
+
+/* View: if multiple selected and clicked row is selected, open all in new tabs */
+function viewFiles(clickedId, clickedHref) {
+    var ids = _getSelectedIds();
+    if (ids.length > 1 && ids.indexOf(clickedId) !== -1) {
+        // Open a new tab for each selected file
+        var rows = document.querySelectorAll('#file-table .file-row.selected');
+        rows.forEach(function(row) {
+            var fid = row.getAttribute('data-file-id');
+            var viewLink = row.querySelector('a[href*="/view"]');
+            if (viewLink) window.open(viewLink.href, '_blank');
+        });
+        return false;  // prevent default link
+    }
+    // Single: let default link behavior handle it
+    return true;
+}
+
+/* Download: if multiple selected, trigger download for each */
+function downloadFiles(clickedId) {
+    var ids = _getSelectedIds();
+    if (ids.length > 1 && ids.indexOf(clickedId) !== -1) {
+        var rows = document.querySelectorAll('#file-table .file-row.selected');
+        rows.forEach(function(row, i) {
+            var dlLink = row.querySelector('a[href*="/download"]');
+            if (dlLink) {
+                // Stagger downloads slightly to avoid browser blocking
+                setTimeout(function() {
+                    var a = document.createElement('a');
+                    a.href = dlLink.href;
+                    a.download = '';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }, i * 200);
+            }
+        });
+        return false;
+    }
+    // Single: let default link behavior handle it
+    return true;
 }
 
 /* Assign button: if multiple selected, open bulk assign; otherwise single */
