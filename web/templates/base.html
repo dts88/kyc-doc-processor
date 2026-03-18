@@ -76,6 +76,7 @@
             <li><a href="{{ url_for('vp_signatures.vp_signature_list') }}" class="{% if request.endpoint == 'vp_signatures.vp_signature_list' %}active{% endif %}">VP Signatures</a></li>
             <li><a href="{{ url_for('kyc_team.kyc_team_list') }}" class="{% if request.endpoint == 'kyc_team.kyc_team_list' %}active{% endif %}">KYC Team</a></li>
             <li><a href="{{ url_for('file_mgmt.file_list') }}" class="{% if request.endpoint and request.endpoint.startswith('file_mgmt.') %}active{% endif %}">File Management</a></li>
+            <li><a href="{{ url_for('upload.upload_page') }}" class="{% if request.endpoint and request.endpoint.startswith('upload.') %}active{% endif %}">Upload</a></li>
         </ul>
     </nav>
 

@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}KYC - Upload Documents{% endblock %}
+{% block content %}
+<h1>Upload KYC Documents</h1>
+
+<div class="info-box">
+    Upload KYC documents for processing. Supported formats: <strong>{{ supported_ext | join(', ') }}</strong>.
+    You may select multiple files at once. Files will be automatically classified and processed.
+</div>
+
+<div class="form-section">
+    <form method="post" enctype="multipart/form-data" id="upload-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+        <div class="form-row">
+            <label>Your Name <span style="color:#e74c3c">*</span></label>
+            <input type="text" name="uploader_name" id="uploader-name" required
+                   placeholder="e.g. John Smith" style="max-width:400px;"
+                   autocomplete="name">
+        </div>
+
+        <div class="form-row">
+            <label>Files <span style="color:#e74c3c">*</span></label>
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-zone-content">
+                    <div class="drop-icon">&#128194;</div>
+                    <p>Drag & drop files here</p>
+                    <p class="text-muted">or</p>
+                    <label class="btn btn-primary" for="file-input" style="cursor:pointer; margin-top:8px;">Choose Files</label>
+                    <input type="file" name="files" id="file-input" multiple
+                           accept="{{ supported_ext | join(',') }}" style="display:none;">
+                </div>
+            </div>
+        </div>
+
+        <!-- File list preview -->
+        <div id="file-list" style="display:none; margin-bottom:16px;">
+            <label style="font-weight:bold; font-size:14px; color:#2c3e50;">Selected files:</label>
+            <table id="file-preview-table" style="margin-top:8px;">
+                <thead>
+                    <tr>
+                        <th style="width:50%">Filename</th>
+                        <th style="width:20%">Size</th>
+                        <th style="width:20%">Type</th>
+                        <th style="width:10%"></th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <p style="margin-top:8px; font-size:13px;" class="text-muted">
+                <span id="file-total-count">0</span> file(s), <span id="file-total-size">0</span>
+            </p>
+        </div>
+
+        <button type="submit" class="btn btn-success" id="upload-btn" disabled style="font-size:16px; padding: 10px 32px;">
+            Upload
+        </button>
+    </form>
+</div>
+
+<style>
+    .text-muted { color: #7f8c8d; }
+
+    .drop-zone {
+        border: 2px dashed #bdc3c7; border-radius: 8px; padding: 40px 20px;
+        text-align: center; cursor: pointer; transition: all 0.2s;
+        background: #fafbfc;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+        border-color: #3498db; background: #eaf2f8;
+    }
+    .drop-zone-content p { margin: 6px 0; font-size: 15px; color: #555; }
+    .drop-icon { font-size: 48px; margin-bottom: 8px; }
+</style>
+
+<script>
+var _selectedFiles = new DataTransfer();
+
+var dropZone = document.getElementById('drop-zone');
+var fileInput = document.getElementById('file-input');
+var uploadBtn = document.getElementById('upload-btn');
+
+/* Drag & drop */
+dropZone.addEventListener('click', function(e) {
+    if (e.target.tagName !== 'LABEL' && e.target.tagName !== 'INPUT') fileInput.click();
+});
+dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('drag-over'); });
+dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    addFiles(e.dataTransfer.files);
+});
+
+/* File input change */
+fileInput.addEventListener('change', function() {
+    addFiles(this.files);
+});
+
+function addFiles(fileList) {
+    var supportedExt = new Set({{ supported_ext | tojson }});
+    for (var i = 0; i < fileList.length; i++) {
+        var f = fileList[i];
+        var ext = '.' + f.name.split('.').pop().toLowerCase();
+        if (!supportedExt.has(ext)) {
+            alert('Unsupported file type: ' + f.name + '\nAllowed: ' + Array.from(supportedExt).join(', '));
+            continue;
+        }
+        // Avoid duplicates by name
+        var dup = false;
+        for (var j = 0; j < _selectedFiles.files.length; j++) {
+            if (_selectedFiles.files[j].name === f.name && _selectedFiles.files[j].size === f.size) { dup = true; break; }
+        }
+        if (!dup) _selectedFiles.items.add(f);
+    }
+    fileInput.files = _selectedFiles.files;
+    renderFileList();
+}
+
+function removeFile(idx) {
+    var newDt = new DataTransfer();
+    for (var i = 0; i < _selectedFiles.files.length; i++) {
+        if (i !== idx) newDt.items.add(_selectedFiles.files[i]);
+    }
+    _selectedFiles = newDt;
+    fileInput.files = _selectedFiles.files;
+    renderFileList();
+}
+
+function renderFileList() {
+    var tbody = document.querySelector('#file-preview-table tbody');
+    var container = document.getElementById('file-list');
+    tbody.innerHTML = '';
+
+    var files = _selectedFiles.files;
+    if (files.length === 0) {
+        container.style.display = 'none';
+        uploadBtn.disabled = true;
+        return;
+    }
+    container.style.display = '';
+    uploadBtn.disabled = false;
+
+    var totalSize = 0;
+    for (var i = 0; i < files.length; i++) {
+        var f = files[i];
+        totalSize += f.size;
+        var ext = f.name.split('.').pop().toUpperCase();
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+            '<td style="word-break:break-word">' + escHtml(f.name) + '</td>' +
+            '<td>' + formatSize(f.size) + '</td>' +
+            '<td>' + ext + '</td>' +
+            '<td><a href="#" onclick="removeFile(' + i + ');return false;" style="color:#e74c3c;" title="Remove">&#10005;</a></td>';
+        tbody.appendChild(tr);
+    }
+
+    document.getElementById('file-total-count').textContent = files.length;
+    document.getElementById('file-total-size').textContent = formatSize(totalSize);
+}
+
+function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function escHtml(s) {
+    var d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+/* Remember uploader name in localStorage */
+var nameInput = document.getElementById('uploader-name');
+var saved = localStorage.getItem('kyc_uploader_name');
+if (saved) nameInput.value = saved;
+document.getElementById('upload-form').addEventListener('submit', function() {
+    localStorage.setItem('kyc_uploader_name', nameInput.value.trim());
+});
+</script>
+{% endblock %}
