@@ -407,6 +407,46 @@ def check_and_package(db: DatabaseManager) -> list[dict]:
     return results
 
 
+def delete_file(db: DatabaseManager, file_id: int) -> dict:
+    """Delete a submitted file and all associated records."""
+    row = db.execute("SELECT * FROM submitted_files WHERE id = ?", (file_id,))
+    if not row:
+        return {"error": f"File #{file_id} not found."}
+    file_info = row[0]
+
+    # Clear checklist references
+    _clear_old_checklist_refs(db, file_id)
+
+    # Delete extraction results, classifications, processing log
+    db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))
+    db.execute("DELETE FROM document_classifications WHERE file_id = ?", (file_id,))
+    db.execute("DELETE FROM processing_log WHERE file_id = ?", (file_id,))
+
+    # Delete file record
+    db.execute("DELETE FROM submitted_files WHERE id = ?", (file_id,))
+
+    # Delete physical file
+    file_path = Path(file_info["file_path"])
+    if file_path.exists():
+        try:
+            file_path.unlink()
+        except OSError as e:
+            logger.warning("Could not delete file %s: %s", file_path, e)
+
+    # Audit log
+    db.execute_insert(
+        """INSERT INTO processing_log (stage, action, details)
+           VALUES (?, ?, ?)""",
+        ("file_management", "delete_file_web", json.dumps({
+            "file_id": file_id,
+            "filename": file_info["original_filename"],
+        })),
+    )
+
+    logger.info("Deleted file #%d: %s", file_id, file_info["original_filename"])
+    return {"success": True, "filename": file_info["original_filename"]}
+
+
 def mark_counterparty_delivered(db: DatabaseManager, counterparty_id: int) -> dict:
     """Mark a completed counterparty as delivered (KYC review done)."""
     rows = db.execute("SELECT * FROM counterparties WHERE id = ?", (counterparty_id,))

@@ -105,6 +105,39 @@
 <!-- C. File List -->
 <h2>Files <small class="text-muted" id="file-count"></small></h2>
 
+<!-- Bulk action bar (hidden until selection) -->
+<div id="bulk-bar" style="display:none; margin-bottom:12px; padding:10px 16px; background:#eaf2f8; border-radius:4px; border-left:4px solid #3498db;">
+    <strong><span id="bulk-count">0</span> file(s) selected</strong> &mdash;
+    <button type="button" class="btn-success btn-sm" onclick="showBulkAssign()">Bulk Assign</button>
+    <button type="button" class="btn-secondary btn-sm" onclick="clearSelection()">Clear Selection</button>
+</div>
+
+<!-- Bulk assign form (hidden by default) -->
+<div id="bulk-assign-form" style="display:none; margin-bottom:12px;">
+    <div class="form-section" style="margin:0; border-left:4px solid #27ae60;">
+        <strong>Bulk Assign <span id="bulk-assign-count">0</span> file(s)</strong>
+        <form method="post" action="{{ url_for('file_mgmt.file_action') }}" class="form-inline" style="margin-top:10px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <input type="hidden" name="action" value="bulk_assign">
+            <div id="bulk-file-ids"></div>
+            <div class="form-row">
+                <label>Doc Type(s)</label>
+                <select name="doc_types" multiple size="4" required style="min-width:200px;">
+                    {% for code, dt in doc_types.items() %}
+                    <option value="{{ code }}">{{ code }} - {{ dt.name_en }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-row">
+                <label>Counterparty</label>
+                <input type="text" name="counterparty" placeholder="Company name or slug" list="counterparty-list">
+            </div>
+            <button type="submit" class="btn-success btn-sm">Confirm Bulk Assign</button>
+            <button type="button" class="btn-secondary btn-sm" onclick="hideBulkAssign()">Cancel</button>
+        </form>
+    </div>
+</div>
+
 {% if files %}
 <table id="file-table" class="filterable-table">
     <thead>
@@ -120,7 +153,7 @@
     </thead>
     <tbody>
         {% for f in files %}
-        <tr class="data-row">
+        <tr class="data-row file-row" data-file-id="{{ f.id }}">
             <td>{{ f.id }}</td>
             <td title="{{ f.file_path }}" style="word-break:break-word; max-width:300px;">{{ f.original_filename }}</td>
             <td>
@@ -136,10 +169,16 @@
             <td>{{ f.doc_type_name or '-' }}</td>
             <td>{{ f.counterparty_name or '-' }}</td>
             <td>{% if f.confidence is not none %}{{ "%.0f" | format(f.confidence * 100) }}%{% else %}-{% endif %}</td>
-            <td style="white-space:nowrap;">
+            <td style="white-space:nowrap;" class="action-cell">
                 <a href="{{ url_for('file_mgmt.file_view', file_id=f.id) }}" class="btn btn-sm btn-secondary" target="_blank">View</a>
                 <a href="{{ url_for('file_mgmt.file_download', file_id=f.id) }}" class="btn btn-sm btn-primary">DL</a>
-                <button type="button" class="btn-sm btn-success" onclick="toggleAssignForm({{ f.id }})">Assign</button>
+                <button type="button" class="btn-sm btn-success" onclick="event.stopPropagation();toggleAssignForm({{ f.id }})">Assign</button>
+                <form method="post" action="{{ url_for('file_mgmt.file_action') }}" style="display:inline;" onsubmit="return deleteFiles({{ f.id }})">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="file_id" value="{{ f.id }}">
+                    <button type="submit" class="btn-sm btn-danger" onclick="event.stopPropagation()">Del</button>
+                </form>
             </td>
         </tr>
         <tr id="assign-row-{{ f.id }}" class="assign-row" style="display:none;">
@@ -225,6 +264,12 @@
     .badge-info { background: #d6eaf8; color: #1a5276; }
     .badge-progress { background: #eaecee; color: #566573; }
     .assign-row { background: #eaf2f8 !important; }
+
+    /* File row hover & selection */
+    #file-table .file-row { cursor: pointer; transition: background 0.1s; }
+    #file-table .file-row:hover { background: #ebedef !important; }
+    #file-table .file-row.selected { background: #d4e6f1 !important; }
+    #file-table .file-row.selected:hover { background: #aed6f1 !important; }
 
     /* Column filter button */
     .col-filter-btn {
@@ -515,10 +560,125 @@ document.addEventListener('mousedown', function(e) {
     }
 });
 
-/* Shared helpers */
+/* ===== File Row Selection (Ctrl/Shift multi-select) ===== */
+var _lastClickedIdx = null;
+
+function _getVisibleFileRows() {
+    return Array.from(document.querySelectorAll('#file-table .file-row')).filter(function(r) { return r.style.display !== 'none'; });
+}
+
+function _getSelectedIds() {
+    var ids = [];
+    document.querySelectorAll('#file-table .file-row.selected').forEach(function(r) {
+        ids.push(parseInt(r.getAttribute('data-file-id')));
+    });
+    return ids;
+}
+
+function _updateBulkBar() {
+    var ids = _getSelectedIds();
+    var bar = document.getElementById('bulk-bar');
+    document.getElementById('bulk-count').textContent = ids.length;
+    bar.style.display = ids.length > 0 ? '' : 'none';
+    if (ids.length === 0) hideBulkAssign();
+}
+
+/* Click handler on file table for row selection */
+document.addEventListener('DOMContentLoaded', function() {
+    var fileTable = document.getElementById('file-table');
+    if (!fileTable) return;
+
+    fileTable.addEventListener('click', function(e) {
+        var row = e.target.closest('tr.file-row');
+        if (!row) return;
+        // Ignore clicks on buttons, links, inputs inside action cell
+        if (e.target.closest('.action-cell') || e.target.closest('a') || e.target.closest('button') || e.target.closest('form')) return;
+
+        var visibleRows = _getVisibleFileRows();
+        var clickedIdx = visibleRows.indexOf(row);
+
+        if (e.shiftKey && _lastClickedIdx !== null) {
+            // Shift: range select
+            var start = Math.min(_lastClickedIdx, clickedIdx);
+            var end = Math.max(_lastClickedIdx, clickedIdx);
+            for (var i = start; i <= end; i++) {
+                visibleRows[i].classList.add('selected');
+            }
+        } else if (e.ctrlKey || e.metaKey) {
+            // Ctrl/Cmd: toggle single
+            row.classList.toggle('selected');
+            _lastClickedIdx = clickedIdx;
+        } else {
+            // Plain click: select only this one
+            document.querySelectorAll('#file-table .file-row.selected').forEach(function(r) { r.classList.remove('selected'); });
+            row.classList.add('selected');
+            _lastClickedIdx = clickedIdx;
+        }
+        _updateBulkBar();
+    });
+});
+
+function clearSelection() {
+    document.querySelectorAll('#file-table .file-row.selected').forEach(function(r) { r.classList.remove('selected'); });
+    _lastClickedIdx = null;
+    _updateBulkBar();
+}
+
+/* Bulk assign form */
+function showBulkAssign() {
+    var ids = _getSelectedIds();
+    if (ids.length === 0) return;
+    var container = document.getElementById('bulk-file-ids');
+    container.innerHTML = '';
+    ids.forEach(function(id) {
+        var inp = document.createElement('input');
+        inp.type = 'hidden'; inp.name = 'file_ids'; inp.value = id;
+        container.appendChild(inp);
+    });
+    document.getElementById('bulk-assign-count').textContent = ids.length;
+    document.getElementById('bulk-assign-form').style.display = '';
+}
+
+function hideBulkAssign() {
+    document.getElementById('bulk-assign-form').style.display = 'none';
+}
+
+/* Assign button: if multiple selected, open bulk assign; otherwise single */
 function toggleAssignForm(fileId) {
-    var row = document.getElementById('assign-row-' + fileId);
-    row.style.display = row.style.display === 'none' ? '' : 'none';
+    var ids = _getSelectedIds();
+    if (ids.length > 1 && ids.indexOf(fileId) !== -1) {
+        showBulkAssign();
+    } else {
+        var row = document.getElementById('assign-row-' + fileId);
+        row.style.display = row.style.display === 'none' ? '' : 'none';
+    }
+}
+
+/* Delete: if multiple selected and clicked row is selected, delete all selected */
+function deleteFiles(clickedId) {
+    var ids = _getSelectedIds();
+    if (ids.length > 1 && ids.indexOf(clickedId) !== -1) {
+        if (!confirm('Delete ' + ids.length + ' selected file(s)?')) return false;
+        // Submit via a dynamically created form
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '{{ url_for("file_mgmt.file_action") }}';
+        var csrf = document.createElement('input');
+        csrf.type = 'hidden'; csrf.name = 'csrf_token'; csrf.value = '{{ csrf_token() }}';
+        form.appendChild(csrf);
+        var action = document.createElement('input');
+        action.type = 'hidden'; action.name = 'action'; action.value = 'bulk_delete';
+        form.appendChild(action);
+        ids.forEach(function(id) {
+            var inp = document.createElement('input');
+            inp.type = 'hidden'; inp.name = 'file_ids'; inp.value = id;
+            form.appendChild(inp);
+        });
+        document.body.appendChild(form);
+        form.submit();
+        return false;
+    }
+    return confirm('Delete file #' + clickedId + '?');
 }
 
 function fillMergeSource(cpId, cpName) {

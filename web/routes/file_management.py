@@ -104,6 +104,57 @@ def file_action():
                         "success",
                     )
 
+        elif action == "delete":
+            file_id = request.form.get("file_id", type=int)
+            if file_id:
+                from web.services.file_service import delete_file
+                result = delete_file(db, file_id)
+                if "error" in result:
+                    flash(result["error"], "error")
+                else:
+                    flash(f"Deleted file: {result['filename']}", "success")
+
+        elif action == "bulk_delete":
+            file_ids = request.form.getlist("file_ids", type=int)
+            if file_ids:
+                from web.services.file_service import delete_file
+                deleted = 0
+                for fid in file_ids:
+                    result = delete_file(db, fid)
+                    if "error" not in result:
+                        deleted += 1
+                    else:
+                        flash(f"File #{fid}: {result['error']}", "error")
+                if deleted:
+                    flash(f"Deleted {deleted} file(s).", "success")
+
+        elif action == "bulk_assign":
+            file_ids = request.form.getlist("file_ids", type=int)
+            doc_types_raw = request.form.getlist("doc_types")
+            counterparty = request.form.get("counterparty", "").strip()
+            fuzzy_threshold = request.form.get("fuzzy_threshold", 85, type=int)
+
+            if not file_ids or not doc_types_raw:
+                flash("Select files and at least one document type.", "error")
+                return redirect(url_for("file_mgmt.file_list"))
+
+            success_count = 0
+            for fid in file_ids:
+                result = assign_file_classification(
+                    db, fid, doc_types_raw, counterparty, fuzzy_threshold
+                )
+                if "error" in result:
+                    flash(f"File #{fid}: {result['error']}", "error")
+                else:
+                    success_count += 1
+
+            if success_count:
+                types_str = ", ".join(doc_types_raw)
+                flash(
+                    f"Bulk assigned {success_count} file(s) as [{types_str}] to {counterparty or 'existing'}",
+                    "success",
+                )
+
         elif action == "mark_delivered":
             cp_id = request.form.get("counterparty_id", type=int)
             if cp_id:
