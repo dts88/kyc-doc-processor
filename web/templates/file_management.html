@@ -166,6 +166,14 @@
                 <a href="{{ url_for('file_mgmt.file_view', file_id=f.id) }}" class="btn btn-sm btn-secondary" target="_blank" onclick="event.stopPropagation();return viewFiles({{ f.id }},this.href)">View</a>
                 <a href="{{ url_for('file_mgmt.file_download', file_id=f.id) }}" class="btn btn-sm btn-primary" onclick="event.stopPropagation();return downloadFiles({{ f.id }})">DL</a>
                 <button type="button" class="btn-sm btn-success" onclick="event.stopPropagation();toggleAssignForm({{ f.id }})">Assign</button>
+                {% if f.status in ('error', 'needs_review') %}
+                <form method="post" action="{{ url_for('file_mgmt.file_action') }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="action" value="reprocess">
+                    <input type="hidden" name="file_id" value="{{ f.id }}">
+                    <button type="submit" class="btn-sm btn-warn" onclick="event.stopPropagation()">Retry</button>
+                </form>
+                {% endif %}
                 <form method="post" action="{{ url_for('file_mgmt.file_action') }}" style="display:inline;" onsubmit="return deleteFiles({{ f.id }})">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="action" value="delete">
@@ -269,6 +277,8 @@
     #file-table .file-row:hover { background: #ebedef !important; }
     #file-table .file-row.selected { background: #d4e6f1 !important; }
     #file-table .file-row.selected:hover { background: #aed6f1 !important; }
+    .btn-warn { background: #e67e22; color: white; }
+    .btn-warn:hover { background: #d35400; }
 
     /* Column filter button */
     .col-filter-btn {

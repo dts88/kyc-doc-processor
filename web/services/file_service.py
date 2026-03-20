@@ -199,6 +199,86 @@ def _clear_old_checklist_refs(db: DatabaseManager, file_id: int) -> None:
     )
 
 
+def reprocess_file(db: DatabaseManager, file_id: int) -> dict:
+    """Reset a file to pending and reprocess it in the background.
+
+    Clears previous classification/extraction and re-runs the full pipeline.
+    Returns immediately; processing happens in a background thread.
+    """
+    row = db.execute("SELECT * FROM submitted_files WHERE id = ?", (file_id,))
+    if not row:
+        return {"error": f"File #{file_id} not found."}
+    file_info = row[0]
+
+    # Clear old data
+    _clear_old_checklist_refs(db, file_id)
+    db.execute("DELETE FROM extraction_results WHERE file_id = ?", (file_id,))
+    db.execute("DELETE FROM document_classifications WHERE file_id = ?", (file_id,))
+
+    # Reset status to pending
+    db.execute(
+        "UPDATE submitted_files SET status = 'pending', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (file_id,),
+    )
+
+    # Audit log
+    db.execute_insert(
+        """INSERT INTO processing_log (file_id, stage, action, details)
+           VALUES (?, 'pipeline', 'reprocess_web', ?)""",
+        (file_id, json.dumps({"filename": file_info["original_filename"]})),
+    )
+
+    # Run full pipeline in background thread
+    db_path = str(db.db_path)
+    _reprocess_background(db_path, file_id)
+
+    return {"success": True, "filename": file_info["original_filename"]}
+
+
+def _reprocess_background(db_path: str, file_id: int):
+    """Run the full pipeline for a file in a background thread."""
+    def _worker():
+        import yaml
+        from database.connection import DatabaseManager as DBM
+
+        bg_db = DBM(db_path)
+        try:
+            config_path = PROJECT_ROOT / "config.yaml"
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+
+            # Initialize Claude backend
+            client = None
+            try:
+                import anthropic
+                client = anthropic.Anthropic()
+                key = client.api_key or ""
+                if not key or key.startswith("your-") or len(key) < 20:
+                    raise ValueError("Missing or placeholder API key")
+            except Exception:
+                client = None
+
+            # Import and run single file processor from main
+            from main import _process_single_file, load_config, _check_and_package
+            load_config(bg_db)
+            _process_single_file(config, bg_db, client, file_id)
+            _check_and_package(config, bg_db)
+
+            logger.info("Background reprocess done for file #%d", file_id)
+        except Exception:
+            logger.exception("Background reprocess failed for file #%d", file_id)
+            bg_db.execute(
+                "UPDATE submitted_files SET status = 'error', error_message = ? WHERE id = ?",
+                ("Reprocess failed: see logs", file_id),
+            )
+        finally:
+            bg_db.close()
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    logger.info("Started background reprocess thread for file #%d", file_id)
+
+
 def _run_extraction_background(
     db_path: str, file_id: int, classification_ids: dict,
     doc_type_codes: list, file_path_str: str, counterparty_id: int,

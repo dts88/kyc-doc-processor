@@ -97,6 +97,16 @@ def file_action():
                     "success",
                 )
 
+        elif action == "reprocess":
+            file_id = request.form.get("file_id", type=int)
+            if file_id:
+                from web.services.file_service import reprocess_file
+                result = reprocess_file(db, file_id)
+                if "error" in result:
+                    flash(result["error"], "error")
+                else:
+                    flash(f"Reprocessing {result['filename']} in background...", "success")
+
         elif action == "delete":
             file_id = request.form.get("file_id", type=int)
             if file_id:
