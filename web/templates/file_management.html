@@ -334,8 +334,33 @@
 var _activeFilters = {};  // "tableId:colIdx" -> Set of allowed values
 var _openDropdown = null;
 var _justOpenedFilter = false;  // guard against immediate close
+var _FILTER_STORAGE_KEY = 'kyc_fm_filters';
 
 function _getFilterKey(tableId, colIdx) { return tableId + ':' + colIdx; }
+
+/* Persist filters to localStorage */
+function _saveFilters() {
+    var obj = {};
+    for (var key in _activeFilters) {
+        obj[key] = Array.from(_activeFilters[key]);
+    }
+    localStorage.setItem(_FILTER_STORAGE_KEY, JSON.stringify(obj));
+}
+
+/* Load filters from localStorage. Returns true if filters were loaded. */
+function _loadFilters() {
+    try {
+        var raw = localStorage.getItem(_FILTER_STORAGE_KEY);
+        if (!raw) return false;
+        var obj = JSON.parse(raw);
+        for (var key in obj) {
+            if (Array.isArray(obj[key])) {
+                _activeFilters[key] = new Set(obj[key]);
+            }
+        }
+        return Object.keys(obj).length > 0;
+    } catch(e) { return false; }
+}
 
 /* Collect unique values from a column */
 function _getColumnValues(tableId, colIdx) {
@@ -434,6 +459,7 @@ function openColFilter(tableId, colIdx, btnEl) {
         btnEl.classList.remove('active');
         _closeDropdown();
         _applyAllFilters(tableId);
+        _saveFilters();
     };
     var okBtn = document.createElement('button');
     okBtn.textContent = 'OK';
@@ -457,6 +483,7 @@ function openColFilter(tableId, colIdx, btnEl) {
         }
         _closeDropdown();
         _applyAllFilters(tableId);
+        _saveFilters();
     };
     footer.appendChild(clearBtn);
     footer.appendChild(okBtn);
@@ -740,25 +767,41 @@ function fillMergeSource(cpId, cpName) {
     window.scrollTo(0, document.body.scrollHeight);
 }
 
-/* On load */
+/* On load: restore saved filters or apply defaults */
 document.addEventListener('DOMContentLoaded', function() {
-    // Default: hide delivered in CP table
+    var hadSaved = _loadFilters();
+
     var cpTable = document.getElementById('cp-table');
     if (cpTable) {
-        var vals = _getColumnValues('cp-table', 1);
-        var nonDelivered = new Set();
-        vals.forEach(function(pair) {
-            if (pair[0].indexOf('delivered') === -1) nonDelivered.add(pair[0]);
-        });
-        if (nonDelivered.size < vals.length) {
-            _activeFilters[_getFilterKey('cp-table', 1)] = nonDelivered;
-            var statusBtn = cpTable.querySelector('th[data-col="1"] .col-filter-btn');
-            if (statusBtn) statusBtn.classList.add('active');
+        // First visit (no saved filters): default hide delivered
+        if (!hadSaved) {
+            var vals = _getColumnValues('cp-table', 1);
+            var nonDelivered = new Set();
+            vals.forEach(function(pair) {
+                if (pair[0].indexOf('delivered') === -1) nonDelivered.add(pair[0]);
+            });
+            if (nonDelivered.size < vals.length) {
+                _activeFilters[_getFilterKey('cp-table', 1)] = nonDelivered;
+            }
+        }
+        // Highlight active filter icons
+        for (var key in _activeFilters) {
+            if (key.indexOf('cp-table:') !== 0) continue;
+            var col = key.split(':')[1];
+            var btn = cpTable.querySelector('th[data-col="' + col + '"] .col-filter-btn');
+            if (btn) btn.classList.add('active');
         }
         _applyAllFilters('cp-table');
     }
+
     var fileTable = document.getElementById('file-table');
     if (fileTable) {
+        for (var key in _activeFilters) {
+            if (key.indexOf('file-table:') !== 0) continue;
+            var col = key.split(':')[1];
+            var btn = fileTable.querySelector('th[data-col="' + col + '"] .col-filter-btn');
+            if (btn) btn.classList.add('active');
+        }
         _applyAllFilters('file-table');
     }
 });
