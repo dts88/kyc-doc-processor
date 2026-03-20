@@ -178,7 +178,7 @@ def package_counterparty(
 
     # Update file statuses to 'packaged' for all files belonging to this counterparty
     db.execute(
-        """UPDATE submitted_files SET status = 'packaged', updated_at = CURRENT_TIMESTAMP
+        """UPDATE submitted_files SET status = 'packaged', error_message = NULL, updated_at = CURRENT_TIMESTAMP
            WHERE id IN (
                SELECT DISTINCT dc.file_id FROM document_classifications dc
                WHERE dc.counterparty_id = ?

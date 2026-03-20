@@ -412,7 +412,7 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
                     primary_dest = dest_path
 
     db.execute(
-        "UPDATE submitted_files SET status = 'classified', file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE submitted_files SET status = 'classified', file_path = ?, error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (str(primary_dest), file_id),
     )
 
@@ -469,7 +469,7 @@ def _process_single_file(config: dict, db: DatabaseManager, client, file_id: int
         click.echo(f"    {ext_type}: validated={extraction.validated}")
 
     db.execute(
-        "UPDATE submitted_files SET status = 'extraction_done', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE submitted_files SET status = 'extraction_done', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (file_id,),
     )
 

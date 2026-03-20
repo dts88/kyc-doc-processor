@@ -394,7 +394,7 @@ def _run_extraction(
         )
 
         db.execute(
-            "UPDATE submitted_files SET status = 'extraction_done', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE submitted_files SET status = 'extraction_done', error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (file_id,),
         )
 
