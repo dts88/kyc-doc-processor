@@ -8,32 +8,32 @@
     <div class="stat-card">
         <div class="number">{{ stats.total }}</div>
         <div class="label">Total Files</div>
-        <a href="{{ url_for('file_mgmt.file_list', status='all') }}">View all</a>
+        <a href="#" onclick="quickFilterFiles(null);return false;">View all</a>
     </div>
     <div class="stat-card warn">
         <div class="number">{{ stats.needs_review }}</div>
         <div class="label">Needs Review</div>
-        <a href="{{ url_for('file_mgmt.file_list', status='needs_review') }}">View</a>
+        <a href="#" onclick="quickFilterFiles('needs_review');return false;">View</a>
     </div>
     <div class="stat-card off">
         <div class="number">{{ stats.error }}</div>
         <div class="label">Errors</div>
-        <a href="{{ url_for('file_mgmt.file_list', status='error') }}">View</a>
+        <a href="#" onclick="quickFilterFiles('error');return false;">View</a>
     </div>
     <div class="stat-card ok">
         <div class="number">{{ stats.classified }}</div>
         <div class="label">Classified</div>
-        <a href="{{ url_for('file_mgmt.file_list', status='classified') }}">View</a>
+        <a href="#" onclick="quickFilterFiles('classified');return false;">View</a>
     </div>
     <div class="stat-card ok">
         <div class="number">{{ stats.extraction_done }}</div>
         <div class="label">Extracted</div>
-        <a href="{{ url_for('file_mgmt.file_list', status='extraction_done') }}">View</a>
+        <a href="#" onclick="quickFilterFiles('extraction_done');return false;">View</a>
     </div>
     <div class="stat-card" style="border-left: 4px solid #2980b9;">
         <div class="number">{{ stats.packaged }}</div>
         <div class="label">Packaged</div>
-        <a href="{{ url_for('file_mgmt.file_list', status='packaged') }}">View</a>
+        <a href="#" onclick="quickFilterFiles('packaged');return false;">View</a>
     </div>
 </div>
 
@@ -765,6 +765,36 @@ function fillMergeSource(cpId, cpName) {
         if (sel.options[i].value == cpId) { sel.options[i].selected = true; break; }
     }
     window.scrollTo(0, document.body.scrollHeight);
+}
+
+/* Quick filter from stat cards — temporary, not saved to localStorage */
+function quickFilterFiles(status) {
+    var key = _getFilterKey('file-table', 2);  // col 2 = Status
+    if (!status) {
+        // "View all": clear status filter
+        delete _activeFilters[key];
+    } else {
+        // Find the matching value (badge text is lowercase status)
+        var vals = _getColumnValues('file-table', 2);
+        var matched = new Set();
+        vals.forEach(function(pair) {
+            if (pair[0].indexOf(status) !== -1) matched.add(pair[0]);
+        });
+        if (matched.size > 0) {
+            _activeFilters[key] = matched;
+        }
+    }
+    // Update filter icon state
+    var fileTable = document.getElementById('file-table');
+    if (fileTable) {
+        var btn = fileTable.querySelector('th[data-col="2"] .col-filter-btn');
+        if (btn) btn.classList.toggle('active', !!_activeFilters[key]);
+        _applyAllFilters('file-table');
+    }
+    // Scroll to file table
+    var heading = document.getElementById('file-count');
+    if (heading) heading.closest('h2').scrollIntoView({behavior: 'smooth'});
+    // Note: deliberately NOT calling _saveFilters() — this is temporary
 }
 
 /* On load: restore saved filters or apply defaults */
