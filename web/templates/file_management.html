@@ -103,7 +103,23 @@
 {% endif %}
 
 <!-- C. File List -->
-<h2>Files <small class="text-muted" id="file-count"></small></h2>
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; margin:25px 0 10px;">
+    <h2 style="margin:0;">Files <small class="text-muted" id="file-count"></small></h2>
+    <div id="paging-bar" style="display:flex; align-items:center; gap:8px; font-size:13px; color:#555;">
+        <span>Rows:</span>
+        <select id="page-size" onchange="changePageSize()" style="padding:2px 4px; border:1px solid #ccc; border-radius:3px; font-size:12px;">
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="0" selected>All</option>
+        </select>
+        <span id="paging-info"></span>
+        <button type="button" class="btn-secondary btn-sm" id="pg-prev" onclick="pagePrev()" disabled>&laquo;</button>
+        <button type="button" class="btn-secondary btn-sm" id="pg-next" onclick="pageNext()">&raquo;</button>
+    </div>
+</div>
 
 <!-- Bulk assign form (hidden by default) -->
 <div id="bulk-assign-form" style="display:none; margin-bottom:12px;">
@@ -212,22 +228,6 @@
 {% else %}
 <p class="text-muted">No files matching filter.</p>
 {% endif %}
-
-<!-- Pagination bar -->
-<div id="paging-bar" style="display:flex; align-items:center; gap:12px; padding:10px 0; font-size:13px; color:#555;">
-    <span>Rows per page:</span>
-    <select id="page-size" onchange="changePageSize()" style="padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:13px;">
-        <option value="10">10</option>
-        <option value="15">15</option>
-        <option value="20">20</option>
-        <option value="50">50</option>
-        <option value="100">100</option>
-        <option value="0" selected>All</option>
-    </select>
-    <span id="paging-info"></span>
-    <button type="button" class="btn-secondary btn-sm" id="pg-prev" onclick="pagePrev()" disabled>&laquo; Prev</button>
-    <button type="button" class="btn-secondary btn-sm" id="pg-next" onclick="pageNext()">Next &raquo;</button>
-</div>
 
 <!-- Selection bar (below file table) -->
 <div id="bulk-bar" style="display:none; padding:10px 16px; background:#eaf2f8; border-radius:4px; border-left:4px solid #3498db; margin-bottom:16px;">
