@@ -213,8 +213,24 @@
 <p class="text-muted">No files matching filter.</p>
 {% endif %}
 
+<!-- Pagination bar -->
+<div id="paging-bar" style="display:flex; align-items:center; gap:12px; padding:10px 0; font-size:13px; color:#555;">
+    <span>Rows per page:</span>
+    <select id="page-size" onchange="changePageSize()" style="padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:13px;">
+        <option value="10">10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="0" selected>All</option>
+    </select>
+    <span id="paging-info"></span>
+    <button type="button" class="btn-secondary btn-sm" id="pg-prev" onclick="pagePrev()" disabled>&laquo; Prev</button>
+    <button type="button" class="btn-secondary btn-sm" id="pg-next" onclick="pageNext()">Next &raquo;</button>
+</div>
+
 <!-- Selection bar (below file table) -->
-<div id="bulk-bar" style="display:none; padding:10px 16px; background:#eaf2f8; border-radius:4px; border-left:4px solid #3498db; margin-top:-10px; margin-bottom:16px;">
+<div id="bulk-bar" style="display:none; padding:10px 16px; background:#eaf2f8; border-radius:4px; border-left:4px solid #3498db; margin-bottom:16px;">
     <strong><span id="bulk-count">0</span> file(s) selected</strong> &mdash;
     <button type="button" class="btn-secondary btn-sm" onclick="clearSelection()">Clear Selection</button>
 </div>
@@ -514,6 +530,7 @@ function _applyAllFilters(tableId) {
     var table = document.getElementById(tableId);
     var rows = table.querySelectorAll('tbody tr.data-row');
     var visibleCount = 0;
+    var filteredRows = [];
 
     rows.forEach(function(row) {
         var visible = true;
@@ -526,12 +543,19 @@ function _applyAllFilters(tableId) {
             var val = cell.textContent.trim().replace(/\s+/g, ' ').toLowerCase();
             if (!allowed.has(val)) { visible = false; break; }
         }
-        row.style.display = visible ? '' : 'none';
 
         if (tableId === 'file-table') {
-            var fileId = row.cells[0] ? row.cells[0].textContent.trim() : '';
-            var assignRow = document.getElementById('assign-row-' + fileId);
-            if (assignRow && !visible) assignRow.style.display = 'none';
+            // For file table: collect filtered rows, pagination will handle display
+            if (visible) {
+                filteredRows.push(row);
+            } else {
+                row.style.display = 'none';
+                var fid = row.getAttribute('data-file-id');
+                var assignRow = document.getElementById('assign-row-' + fid);
+                if (assignRow) assignRow.style.display = 'none';
+            }
+        } else {
+            row.style.display = visible ? '' : 'none';
         }
         if (visible) visibleCount++;
     });
@@ -541,6 +565,9 @@ function _applyAllFilters(tableId) {
         document.getElementById('cp-count').textContent = '(' + visibleCount + '/' + total + ')';
     } else if (tableId === 'file-table') {
         document.getElementById('file-count').textContent = '(' + visibleCount + '/' + total + ')';
+        _filteredFileRows = filteredRows;
+        _currentPage = 1;  // reset to page 1 when filter changes
+        _applyPagination();
     }
 }
 
@@ -767,6 +794,66 @@ function fillMergeSource(cpId, cpName) {
     window.scrollTo(0, document.body.scrollHeight);
 }
 
+/* ===== Pagination for Files table ===== */
+var _PAGE_STORAGE_KEY = 'kyc_fm_page_size';
+var _currentPage = 1;
+var _pageSize = 0;  // 0 = all
+var _filteredFileRows = [];  // cache of visible rows after filter
+
+function _loadPageSize() {
+    try {
+        var saved = localStorage.getItem(_PAGE_STORAGE_KEY);
+        if (saved !== null) _pageSize = parseInt(saved) || 0;
+    } catch(e) {}
+}
+
+function _savePageSize() {
+    localStorage.setItem(_PAGE_STORAGE_KEY, String(_pageSize));
+}
+
+function changePageSize() {
+    _pageSize = parseInt(document.getElementById('page-size').value) || 0;
+    _currentPage = 1;
+    _savePageSize();
+    _applyPagination();
+}
+
+function pagePrev() {
+    if (_currentPage > 1) { _currentPage--; _applyPagination(); }
+}
+
+function pageNext() {
+    var totalPages = _pageSize > 0 ? Math.ceil(_filteredFileRows.length / _pageSize) : 1;
+    if (_currentPage < totalPages) { _currentPage++; _applyPagination(); }
+}
+
+function _applyPagination() {
+    var total = _filteredFileRows.length;
+    var pageSize = _pageSize;
+    if (pageSize <= 0) pageSize = total;  // all
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (_currentPage > totalPages) _currentPage = totalPages;
+
+    var start = (_currentPage - 1) * pageSize;
+    var end = start + pageSize;
+
+    _filteredFileRows.forEach(function(row, i) {
+        var inPage = (i >= start && i < end);
+        row.style.display = inPage ? '' : 'none';
+        // Also hide assign row if not in page
+        var fid = row.getAttribute('data-file-id');
+        var assignRow = document.getElementById('assign-row-' + fid);
+        if (assignRow && !inPage) assignRow.style.display = 'none';
+    });
+
+    // Update info
+    var showing = Math.min(end, total);
+    document.getElementById('paging-info').textContent =
+        total > 0 ? (start + 1) + '-' + showing + ' of ' + total : '0 of 0';
+    document.getElementById('pg-prev').disabled = (_currentPage <= 1);
+    document.getElementById('pg-next').disabled = (_currentPage >= totalPages);
+}
+
 /* Quick filter from stat cards — temporary, not saved to localStorage */
 function quickFilterFiles(status) {
     var key = _getFilterKey('file-table', 2);  // col 2 = Status
@@ -797,9 +884,17 @@ function quickFilterFiles(status) {
     // Note: deliberately NOT calling _saveFilters() — this is temporary
 }
 
-/* On load: restore saved filters or apply defaults */
+/* On load: restore saved filters and page size */
 document.addEventListener('DOMContentLoaded', function() {
     var hadSaved = _loadFilters();
+    _loadPageSize();
+    // Restore page size selector
+    var pageSel = document.getElementById('page-size');
+    if (pageSel) {
+        pageSel.value = String(_pageSize);
+        // If value not in options, default to 0 (all)
+        if (pageSel.selectedIndex === -1) { _pageSize = 0; pageSel.value = '0'; }
+    }
 
     var cpTable = document.getElementById('cp-table');
     if (cpTable) {
