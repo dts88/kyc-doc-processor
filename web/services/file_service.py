@@ -414,12 +414,12 @@ def _reset_if_completed(db: DatabaseManager, counterparty_id: int):
     rows = db.execute(
         "SELECT status FROM counterparties WHERE id = ?", (counterparty_id,)
     )
-    if rows and rows[0]["status"] == "completed":
+    if rows and rows[0]["status"] in ("completed", "pending_review"):
         db.execute(
             "UPDATE counterparties SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (counterparty_id,),
         )
-        logger.info("Reset counterparty #%d to in_progress for re-packaging", counterparty_id)
+        logger.info("Reset counterparty #%d to in_progress (new file added)", counterparty_id)
 
 
 def _cleanup_conversion_artifacts(image_paths: list[Path] | None, original_path: Path):
@@ -480,25 +480,51 @@ def _move_to_classified(
 
 
 def check_and_package(db: DatabaseManager) -> list[dict]:
-    """Check for completed counterparties and package them.
+    """Check for counterparties with all required docs and mark as pending_review.
 
-    Returns list of packaged counterparty info dicts.
+    No longer auto-packages. Returns list of newly marked counterparty info.
+    """
+    from tracking.completion_checker import check_and_mark_pending_review
+
+    newly_marked = check_and_mark_pending_review(db)
+    results = []
+    for cp_id in newly_marked:
+        cp = db.execute("SELECT name FROM counterparties WHERE id = ?", (cp_id,))
+        results.append({
+            "counterparty_id": cp_id,
+            "name": cp[0]["name"] if cp else f"#{cp_id}",
+            "status": "pending_review",
+        })
+    return results
+
+
+def mark_counterparty_completed(db: DatabaseManager, counterparty_id: int) -> dict:
+    """Package a pending_review counterparty and mark as completed.
+
+    Triggers ZIP packaging and email notification.
     """
     from notification.notifier import send_completion_notification
-    from tracking.completion_checker import get_newly_completed
     from tracking.packaging import package_counterparty
+
+    rows = db.execute("SELECT * FROM counterparties WHERE id = ?", (counterparty_id,))
+    if not rows:
+        return {"error": f"Counterparty #{counterparty_id} not found."}
+    cp = rows[0]
+    if cp["status"] != "pending_review":
+        return {"error": f"Counterparty '{cp['name']}' is not pending review (status: {cp['status']})."}
 
     config = _load_config()
     if not config:
-        return []
-
-    newly_completed = get_newly_completed(db)
-    if not newly_completed:
-        return []
+        return {"error": "Could not load config."}
 
     classified_dir = PROJECT_ROOT / config["paths"]["classified"]
     completed_dir = PROJECT_ROOT / config["paths"]["completed"]
 
+    zip_path = package_counterparty(db, counterparty_id, classified_dir, completed_dir)
+    if not zip_path:
+        return {"error": f"Packaging failed for '{cp['name']}'."}
+
+    # Send notification
     smtp_config = {
         "host": config["notification"]["smtp_host"],
         "port": config["notification"]["smtp_port"],
@@ -507,21 +533,17 @@ def check_and_package(db: DatabaseManager) -> list[dict]:
         "from_address": config["notification"]["from_address"],
         "recipients": config["notification"]["compliance_team"],
     }
+    send_completion_notification(db, counterparty_id, zip_path, smtp_config)
 
-    results = []
-    for cp_id in newly_completed:
-        zip_path = package_counterparty(db, cp_id, classified_dir, completed_dir)
-        if zip_path:
-            send_completion_notification(db, cp_id, zip_path, smtp_config)
-            cp = db.execute("SELECT name FROM counterparties WHERE id = ?", (cp_id,))
-            results.append({
-                "counterparty_id": cp_id,
-                "name": cp[0]["name"] if cp else f"#{cp_id}",
-                "zip_path": zip_path,
-            })
-            logger.info("Packaged counterparty #%d: %s", cp_id, zip_path)
+    # Audit log
+    db.execute_insert(
+        """INSERT INTO processing_log (counterparty_id, stage, action, details)
+           VALUES (?, 'tracking', 'mark_completed_web', ?)""",
+        (counterparty_id, json.dumps({"name": cp["name"], "zip_path": zip_path})),
+    )
 
-    return results
+    logger.info("Marked counterparty #%d (%s) as completed, package: %s", counterparty_id, cp["name"], zip_path)
+    return {"success": True, "name": cp["name"], "zip_path": zip_path}
 
 
 def delete_file(db: DatabaseManager, file_id: int) -> dict:

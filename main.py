@@ -494,7 +494,7 @@ def _reset_if_completed(db, counterparty_id: int):
     rows = db.execute(
         "SELECT status FROM counterparties WHERE id = ?", (counterparty_id,)
     )
-    if rows and rows[0]["status"] == "completed":
+    if rows and rows[0]["status"] in ("completed", "pending_review"):
         db.execute(
             "UPDATE counterparties SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (counterparty_id,),
@@ -518,36 +518,21 @@ def _cleanup_conversion_artifacts(image_paths: list | None, original_path):
 
 
 def _check_and_package(config: dict, db: DatabaseManager):
-    """Check all counterparties for completion and package if ready."""
-    from notification.notifier import send_completion_notification
-    from tracking.completion_checker import get_newly_completed
-    from tracking.packaging import package_counterparty
+    """Check all counterparties for completion and mark as pending_review.
+
+    No longer auto-packages. Packaging is triggered manually via web UI
+    (Mark Completed) or the 'package' CLI command.
+    """
+    from tracking.completion_checker import check_and_mark_pending_review
 
     click.echo("\n=== Stage 5: COMPLETION CHECK ===")
-    newly_completed = get_newly_completed(db)
+    newly_marked = check_and_mark_pending_review(db)
 
-    if not newly_completed:
+    if not newly_marked:
         click.echo("  No newly completed counterparties.")
-        return
-
-    classified_dir = resolve_path(config, "classified")
-    completed_dir = resolve_path(config, "completed")
-
-    smtp_config = {
-        "host": config["notification"]["smtp_host"],
-        "port": config["notification"]["smtp_port"],
-        "user": config["notification"]["smtp_user"],
-        "password": config["notification"]["smtp_password"],
-        "from_address": config["notification"]["from_address"],
-        "recipients": config["notification"]["compliance_team"],
-    }
-
-    for cp_id in newly_completed:
-        click.echo(f"  Packaging counterparty #{cp_id}...")
-        zip_path = package_counterparty(db, cp_id, classified_dir, completed_dir)
-        if zip_path:
-            click.echo(f"  -> Package: {zip_path}")
-            send_completion_notification(db, cp_id, zip_path, smtp_config)
+    else:
+        for cp_id in newly_marked:
+            click.echo(f"  Counterparty #{cp_id} -> pending_review (9/9 required docs)")
 
 
 @cli.command()
@@ -1019,16 +1004,52 @@ def assign(file_id, doc_type_codes, counterparty):
 
 
 @cli.command()
-def package():
-    """Check for completed counterparties and package them.
+@click.argument("counterparty_id", type=int, required=False)
+def package(counterparty_id):
+    """Package a pending_review counterparty (or all pending_review).
 
-    Scans all in-progress counterparties, packages those with all required
-    documents, and sends notifications. Safe to run multiple times — already
-    packaged counterparties (status='completed') are skipped.
+    If counterparty_id is given, packages that specific counterparty.
+    Otherwise, packages all counterparties in 'pending_review' status.
     """
+    from notification.notifier import send_completion_notification
+    from tracking.packaging import package_counterparty
+
     config = load_config()
     db = get_db(config)
+
+    # First, check for any newly ready counterparties
     _check_and_package(config, db)
+
+    classified_dir = resolve_path(config, "classified")
+    completed_dir = resolve_path(config, "completed")
+
+    if counterparty_id:
+        cp_ids = [counterparty_id]
+    else:
+        rows = db.execute("SELECT id FROM counterparties WHERE status = 'pending_review'")
+        cp_ids = [r["id"] for r in rows]
+
+    if not cp_ids:
+        click.echo("No counterparties ready for packaging.")
+        db.close()
+        return
+
+    smtp_config = {
+        "host": config["notification"]["smtp_host"],
+        "port": config["notification"]["smtp_port"],
+        "user": config["notification"]["smtp_user"],
+        "password": config["notification"]["smtp_password"],
+        "from_address": config["notification"]["from_address"],
+        "recipients": config["notification"]["compliance_team"],
+    }
+
+    for cp_id in cp_ids:
+        click.echo(f"  Packaging counterparty #{cp_id}...")
+        zip_path = package_counterparty(db, cp_id, classified_dir, completed_dir)
+        if zip_path:
+            click.echo(f"  -> Package: {zip_path}")
+            send_completion_notification(db, cp_id, zip_path, smtp_config)
+
     db.close()
 
 

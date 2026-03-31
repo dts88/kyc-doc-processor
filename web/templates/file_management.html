@@ -64,11 +64,13 @@
     <tbody>
         {% for cp in progress %}
         {% if cp %}
-        <tr class="data-row {{ 'cp-complete' if cp.status == 'completed' else '' }} {{ 'cp-delivered' if cp.status == 'delivered' else '' }}">
+        <tr class="data-row {{ 'cp-pending-review' if cp.status == 'pending_review' else '' }} {{ 'cp-complete' if cp.status == 'completed' else '' }} {{ 'cp-delivered' if cp.status == 'delivered' else '' }}">
             <td><strong>{{ cp.name }}</strong><br><small class="text-muted">#{{ cp.counterparty_id }}</small></td>
             <td>
-                {% if cp.status == 'completed' %}
+                {% if cp.status == 'pending_review' %}
                     <span class="badge badge-warn">Pending Review</span>
+                {% elif cp.status == 'completed' %}
+                    <span class="badge badge-info">Completed</span>
                 {% elif cp.status == 'delivered' %}
                     <span class="badge badge-ok">Delivered</span>
                 {% else %}
@@ -82,7 +84,15 @@
             </td>
             {% endfor %}
             <td style="white-space:nowrap;">
-                {% if cp.status == 'completed' %}
+                {% if cp.status == 'pending_review' %}
+                <button type="button" class="btn-secondary btn-sm" onclick="reviewCounterparty('{{ cp.name }}')">Review</button>
+                <form method="post" action="{{ url_for('file_mgmt.file_action') }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <input type="hidden" name="action" value="mark_completed">
+                    <input type="hidden" name="counterparty_id" value="{{ cp.counterparty_id }}">
+                    <button type="submit" class="btn-primary btn-sm" onclick="return confirm('Package and mark {{ cp.name }} as completed?')">Mark Completed</button>
+                </form>
+                {% elif cp.status == 'completed' %}
                 <form method="post" action="{{ url_for('file_mgmt.file_action') }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="action" value="mark_delivered">
@@ -274,7 +284,8 @@
 </div>
 
 <style>
-    .cp-complete { background: #fef9e7 !important; }
+    .cp-pending-review { background: #fef9e7 !important; }
+    .cp-complete { background: #d6eaf8 !important; }
     .cp-delivered { background: #f0f0f0 !important; }
     .status-missing { color: #e74c3c; font-weight: bold; }
     .status-received { color: #27ae60; }
@@ -854,6 +865,39 @@ function _applyPagination() {
     document.getElementById('pg-next').disabled = (_currentPage >= totalPages);
 }
 
+/* Review button: filter Files table by counterparty name (temporary) */
+function reviewCounterparty(cpName) {
+    var key = _getFilterKey('file-table', 4);  // col 4 = Company
+    var vals = _getColumnValues('file-table', 4);
+    var matched = new Set();
+    var cpLower = cpName.toLowerCase();
+    vals.forEach(function(pair) {
+        if (pair[0] === cpLower) matched.add(pair[0]);
+    });
+    if (matched.size > 0) {
+        _activeFilters[key] = matched;
+    } else {
+        delete _activeFilters[key];
+    }
+    // Clear any status filter to show all files for this company
+    delete _activeFilters[_getFilterKey('file-table', 2)];
+
+    var fileTable = document.getElementById('file-table');
+    if (fileTable) {
+        // Update filter icon states
+        fileTable.querySelectorAll('.col-filter-btn').forEach(function(btn) { btn.classList.remove('active'); });
+        if (matched.size > 0) {
+            var compBtn = fileTable.querySelector('th[data-col="4"] .col-filter-btn');
+            if (compBtn) compBtn.classList.add('active');
+        }
+        _applyAllFilters('file-table');
+    }
+    // Scroll to file table
+    var heading = document.getElementById('file-count');
+    if (heading) heading.closest('div').scrollIntoView({behavior: 'smooth'});
+    // Not saved to localStorage — temporary
+}
+
 /* Quick filter from stat cards — temporary, not saved to localStorage */
 function quickFilterFiles(status) {
     var key = _getFilterKey('file-table', 2);  // col 2 = Status
@@ -898,15 +942,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var cpTable = document.getElementById('cp-table');
     if (cpTable) {
-        // First visit (no saved filters): default hide delivered
+        // First visit (no saved filters): default hide delivered and completed
         if (!hadSaved) {
             var vals = _getColumnValues('cp-table', 1);
-            var nonDelivered = new Set();
+            var activeStatuses = new Set();
             vals.forEach(function(pair) {
-                if (pair[0].indexOf('delivered') === -1) nonDelivered.add(pair[0]);
+                if (pair[0].indexOf('delivered') === -1 && pair[0].indexOf('completed') === -1) {
+                    activeStatuses.add(pair[0]);
+                }
             });
-            if (nonDelivered.size < vals.length) {
-                _activeFilters[_getFilterKey('cp-table', 1)] = nonDelivered;
+            if (activeStatuses.size < vals.length) {
+                _activeFilters[_getFilterKey('cp-table', 1)] = activeStatuses;
             }
         }
         // Highlight active filter icons

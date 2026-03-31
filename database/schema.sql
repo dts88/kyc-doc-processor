@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS counterparties (
     slug TEXT NOT NULL UNIQUE,
     aliases TEXT DEFAULT '[]',  -- JSON array of known name variants
     status TEXT NOT NULL DEFAULT 'in_progress'
-        CHECK (status IN ('in_progress', 'completed', 'delivered')),
+        CHECK (status IN ('in_progress', 'pending_review', 'completed', 'delivered')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

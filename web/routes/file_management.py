@@ -158,6 +158,16 @@ def file_action():
                     "success",
                 )
 
+        elif action == "mark_completed":
+            cp_id = request.form.get("counterparty_id", type=int)
+            if cp_id:
+                from web.services.file_service import mark_counterparty_completed
+                result = mark_counterparty_completed(db, cp_id)
+                if "error" in result:
+                    flash(result["error"], "error")
+                else:
+                    flash(f"Completed & packaged {result['name']} -> {result['zip_path']}", "success")
+
         elif action == "mark_delivered":
             cp_id = request.form.get("counterparty_id", type=int)
             if cp_id:
