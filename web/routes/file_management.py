@@ -15,6 +15,7 @@ from web.services.file_service import (
     get_all_files,
     get_counterparty_progress,
     get_file_detail,
+    get_latest_packages,
     merge_counterparties,
 )
 
@@ -52,6 +53,9 @@ def file_list():
         for row in dc_rows:
             file_doc_types.setdefault(row["file_id"], []).append(row["code"])
 
+        # Latest package path per counterparty (for download button)
+        packages = get_latest_packages(db)
+
         return render_template(
             "file_management.html",
             files=files,
@@ -61,6 +65,7 @@ def file_list():
             progress=progress,
             doc_types=DOC_TYPES,
             file_doc_types=file_doc_types,
+            packages=packages,
         )
     finally:
         db.close()
@@ -244,5 +249,30 @@ def file_view(file_id):
             return redirect(url_for("file_mgmt.file_list"))
 
         return send_file(file_path, as_attachment=False)
+    finally:
+        db.close()
+
+
+@bp.route("/packages/<int:counterparty_id>/download")
+def package_download(counterparty_id):
+    """Download the latest package ZIP for a counterparty."""
+    db = get_db_from_app(current_app)
+    try:
+        rows = db.execute(
+            """SELECT package_path FROM completed_packages
+               WHERE counterparty_id = ? ORDER BY created_at DESC LIMIT 1""",
+            (counterparty_id,),
+        )
+        if not rows:
+            abort(404)
+
+        file_path = Path(rows[0]["package_path"])
+        if not is_safe_path(current_app, file_path):
+            abort(403)
+        if not file_path.exists():
+            flash("Package file not found on disk.", "error")
+            return redirect(url_for("file_mgmt.file_list"))
+
+        return send_file(file_path, as_attachment=True, download_name=file_path.name)
     finally:
         db.close()

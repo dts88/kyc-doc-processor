@@ -93,12 +93,19 @@
                     <button type="submit" class="btn-primary btn-sm" onclick="return confirm('Package and mark {{ cp.name }} as completed?')">Mark Completed</button>
                 </form>
                 {% elif cp.status == 'completed' %}
+                {% if cp.counterparty_id in packages %}
+                <a href="{{ url_for('file_mgmt.package_download', counterparty_id=cp.counterparty_id) }}" class="btn btn-sm btn-primary">Download ZIP</a>
+                {% endif %}
                 <form method="post" action="{{ url_for('file_mgmt.file_action') }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="action" value="mark_delivered">
                     <input type="hidden" name="counterparty_id" value="{{ cp.counterparty_id }}">
                     <button type="submit" class="btn-primary btn-sm" onclick="return confirm('Mark {{ cp.name }} as delivered?')">Mark Delivered</button>
                 </form>
+                {% elif cp.status == 'delivered' %}
+                {% if cp.counterparty_id in packages %}
+                <a href="{{ url_for('file_mgmt.package_download', counterparty_id=cp.counterparty_id) }}" class="btn btn-sm btn-primary">Download ZIP</a>
+                {% endif %}
                 {% endif %}
                 <button type="button" class="btn-secondary btn-sm" onclick="fillMergeSource({{ cp.counterparty_id }}, '{{ cp.name }}')">Merge</button>
             </td>

@@ -611,6 +611,20 @@ def mark_counterparty_delivered(db: DatabaseManager, counterparty_id: int) -> di
     return {"success": True, "name": cp["name"]}
 
 
+def get_latest_packages(db: DatabaseManager) -> dict[int, str]:
+    """Get the latest package path for each counterparty.
+
+    Returns {counterparty_id: package_path}.
+    """
+    rows = db.execute(
+        """SELECT counterparty_id, package_path FROM completed_packages
+           WHERE id IN (
+               SELECT MAX(id) FROM completed_packages GROUP BY counterparty_id
+           )"""
+    )
+    return {r["counterparty_id"]: r["package_path"] for r in rows}
+
+
 def get_counterparty_progress(db: DatabaseManager) -> list[dict]:
     """Get counterparty progress matrix data."""
     return get_all_counterparty_statuses(db)
